@@ -6,13 +6,18 @@
 set -eu
 HAL=/Library/Audio/Plug-Ins/HAL
 DEST="$HAL/MixotoAudio.driver"
-ID=local.mixoto.audio
+ID=io.coollabs.mixoto.audio
+# Pre-release builds used this ID; allow replacing or removing them.
+OLD_ID=local.mixoto.audio
 LEGACY="$HAL/OpenMixerAudio.driver"
 STAGE=
 BACKUP=
+bundle_id() { /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$1/Contents/Info.plist"; }
 check_bundle() {
-    test -d "$1" && test ! -L "$1" &&
-      test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$1/Contents/Info.plist")" = "$ID"
+    test -d "$1" && test ! -L "$1" && test "$(bundle_id "$1")" = "$ID"
+}
+check_installed() {
+    test -d "$1" && test ! -L "$1" && { test "$(bundle_id "$1")" = "$ID" || test "$(bundle_id "$1")" = "$OLD_ID"; }
 }
 if test "$(/usr/bin/id -u)" != 0; then
     echo 'Administrator access is required. Use the Install button or sudo.' >&2
@@ -24,7 +29,7 @@ if test "$#" != 1; then
 fi
 if test -L "$HAL"; then echo 'Refusing a linked HAL directory.' >&2; exit 1; fi
 if test -e "$DEST" || test -L "$DEST"; then
-    check_bundle "$DEST" || { echo 'Refusing to replace an unknown or linked driver.' >&2; exit 1; }
+    check_installed "$DEST" || { echo 'Refusing to replace an unknown or linked driver.' >&2; exit 1; }
 fi
 if test "$1" = --uninstall; then
     if test -d "$DEST"; then /bin/rm -rf "$DEST"; fi

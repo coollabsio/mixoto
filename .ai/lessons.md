@@ -49,3 +49,9 @@
   for the requested asset; save it in the application project directory.
 
 - When copying a visual detail from a reference (shadow side, offset, color), measure it from the reference pixels (e.g. `magick ... txt:-` row/column scan) instead of guessing from a small preview. Guessed Jean's icon shadow as down-left; it is down-right.
+
+- User correction, 2026-09-30: Keep the README brief. Do not include RTK commands in it. Prefix shell tool commands with `rtk`, as required by the local instructions.
+
+- Do not put the local `rtk` wrapper in repository scripts or README commands.
+  CI runners and other developers do not have it. Use plain commands in files;
+  use `rtk` only in your own shell calls.
