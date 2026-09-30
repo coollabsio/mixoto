@@ -63,3 +63,7 @@
 
 - User correction, 2026-09-30: Use only the supplied screenshot for the README.
   Do not add more screenshots or request more images when one is sufficient.
+
+- User correction, 2026-09-30: The menu bar icon must use the same three-fader
+  design as the app icon, not a generic waveform. Use a monochrome template
+  without the app tile/background so macOS can adapt it to the menu bar.

@@ -166,14 +166,36 @@ struct MixotoApp: App {
                 Button("Reinstall Virtual Device…") { Task { await store.installVirtualDevice() } }.disabled(store.busy)
             }
         }
-        MenuBarExtra("Mixoto", systemImage: "waveform") {
+        MenuBarExtra {
             MixerMenuBar()
+        } label: {
+            Image(nsImage: MixerMenuBar.icon).accessibilityLabel("Mixoto")
         }
     }
 }
 
 struct MixerMenuBar: View {
     @Environment(\.openWindow) private var openWindow
+
+    // The same three faders as Resources/AppIcon.svg, without its tile/shadow.
+    // A template lets macOS choose the correct color for the menu bar.
+    static let icon: NSImage = {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
+            NSColor.black.setFill()
+            for (x, knobY) in [(3.0, 8.0), (7.0, 4.0), (11.0, 6.0)] {
+                func rect(_ x: Double, _ y: Double, _ width: Double, _ height: Double) -> NSRect {
+                    NSRect(x: (x - 2) * 1.5 + 0.75, y: (y - 3) * 1.5 + 2.25,
+                           width: width * 1.5, height: height * 1.5)
+                }
+                NSBezierPath(rect: rect(x, 3, 1, 9)).fill()
+                NSBezierPath(rect: rect(x - 1, knobY, 3, 2)).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Mixoto"
+        return image
+    }()
 
     var body: some View {
         Button("Show Mixoto") {

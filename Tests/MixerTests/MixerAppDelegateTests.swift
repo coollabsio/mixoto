@@ -4,6 +4,14 @@ import XCTest
 
 @MainActor
 final class MixerAppDelegateTests: XCTestCase {
+    func testMenuBarIconIsAnAccessibleTemplate() {
+        let image = MixerMenuBar.icon
+        XCTAssertTrue(image.isTemplate)
+        XCTAssertEqual(image.size, NSSize(width: 18, height: 18))
+        XCTAssertEqual(image.accessibilityDescription, "Mixoto")
+        XCTAssertNotNil(image.tiffRepresentation)
+    }
+
     func testClosingLastWindowKeepsAppRunning() {
         XCTAssertFalse(MixerAppDelegate().applicationShouldTerminateAfterLastWindowClosed(.shared))
     }
