@@ -146,10 +146,11 @@ final class MixerStore: ObservableObject {
 
 @main
 struct MixotoApp: App {
+    @NSApplicationDelegateAdaptor(MixerAppDelegate.self) private var appDelegate
     @StateObject private var store = MixerStore()
     @StateObject private var updater = AppUpdater()
     var body: some Scene {
-        WindowGroup("Mixoto") {
+        Window("Mixoto", id: "mixer") {
             MixerView(store: store)
                 .frame(minWidth: 800, minHeight: 580)
                 .task { await SmokeCheck.runIfRequested(store: store) }
@@ -165,6 +166,22 @@ struct MixotoApp: App {
                 Button("Reinstall Virtual Device…") { Task { await store.installVirtualDevice() } }.disabled(store.busy)
             }
         }
+        MenuBarExtra("Mixoto", systemImage: "waveform") {
+            MixerMenuBar()
+        }
+    }
+}
+
+struct MixerMenuBar: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Show Mixoto") {
+            openWindow(id: "mixer")
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
+        Divider()
+        Button("Quit Mixoto…") { NSApplication.shared.terminate(nil) }
     }
 }
 

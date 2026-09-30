@@ -11,7 +11,16 @@ enum SmokeCheck {
             guard let window = NSApplication.shared.windows.first(where: { $0.isVisible }), window.contentView != nil else {
                 throw MixerError.message("No native window is visible.")
             }
+            window.performClose(nil)
+            guard !window.isVisible, NSApplication.shared.isRunning else {
+                throw MixerError.message("Closing the mixer did not keep the app running.")
+            }
+            window.makeKeyAndOrderFront(nil)
+            guard window.isVisible else {
+                throw MixerError.message("Cannot show the mixer again.")
+            }
             let report: [String: Any] = ["windowTitle": window.title, "width": window.frame.width, "height": window.frame.height,
+                                         "closeKeepsAppRunning": true, "windowReopened": true,
                                          "deviceCount": store.devices.count, "applicationCount": store.apps.count, "channelCount": store.settings.channels.count,
                                          "streamDeviceUID": store.settings.streamUID,
                                          "streamDeviceLoaded": store.devices.contains(where: \.isStreamMix),
