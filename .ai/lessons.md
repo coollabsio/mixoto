@@ -40,3 +40,12 @@
 - User correction, 2026-09-30: The debug control must look like a standalone
   icon, without glass, a border, or a button background. Keep a plain Button
   internally for keyboard/accessibility and native popover behavior.
+
+- User correction, 2026-09-30: New channels must start at 100% for both
+  Monitor and Stream Mix. Set defaults in Channel; preserve saved volumes.
+
+- User correction, 2026-09-30: Maxio already uses an M. Give Mixoto a
+  distinct audio-merging symbol, not another purple M. Use pixel-grid SVG
+  for the requested asset; save it in the application project directory.
+
+- When copying a visual detail from a reference (shadow side, offset, color), measure it from the reference pixels (e.g. `magick ... txt:-` row/column scan) instead of guessing from a small preview. Guessed Jean's icon shadow as down-left; it is down-right.

@@ -11,6 +11,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 /usr/bin/xcrun vtool -set-build-version macos 15.0 "$(/usr/bin/xcrun --show-sdk-version)" -replace \
     -output "$APP/Contents/MacOS/Mixoto" "$BIN/Mixoto"
 cp scripts/Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns Resources/Assets.car "$APP/Contents/Resources/"
 rm -rf "$APP/Contents/Resources/MixotoAudio.driver"
 cp -R artifacts/MixotoAudio.driver "$APP/Contents/Resources/MixotoAudio.driver"
 cp scripts/install-driver.sh "$APP/Contents/Resources/install-driver.sh"

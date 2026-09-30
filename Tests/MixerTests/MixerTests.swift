@@ -81,6 +81,13 @@ final class MixerTests: XCTestCase {
         XCTAssertEqual(router.receivedBlocks, 0)
         router.stop()
     }
+    func testNewChannelsStartAtFullVolume() {
+        let channel = Channel()
+        XCTAssertEqual(channel.monitor, 1)
+        XCTAssertEqual(channel.stream, 1)
+        XCTAssertEqual(channel.monitorGain, 1)
+        XCTAssertEqual(channel.streamGain, 1)
+    }
     func testIndependentControls() {
         var channel = Channel(monitor: 0.3, stream: 0.8)
         channel.monitorMuted = true

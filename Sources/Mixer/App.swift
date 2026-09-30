@@ -166,44 +166,42 @@ struct MixerView: View {
     @State private var showingDebugInfo = false
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            GroupBox("Outputs") {
-                VStack {
-                    HStack {
-                        Text("Monitor headphones").frame(width: 170, alignment: .leading)
-                        Picker("Monitor headphones", selection: $store.settings.monitorUID) {
-                            Text("Off — Stream Mix only").tag("")
-                            Text("Default system output").tag(Settings.defaultMonitorUID)
-                            ForEach(store.devices.filter { $0.outputs > 0 && !$0.isLoopback }) { Text($0.name).tag($0.uid) }
-                            if !store.settings.monitorUID.isEmpty && store.settings.monitorUID != Settings.defaultMonitorUID && !store.devices.contains(where: { $0.uid == store.settings.monitorUID }) {
-                                Text("Saved device unavailable").tag(store.settings.monitorUID)
-                            }
-                        }.labelsHidden().flexibleButtonWidth().frame(width: 280)
-                        Spacer()
-                        // Running state and Start/Stop control in one: green runs, red is stopped.
-                        Button { Task { if store.running { await store.stop() } else { await store.start() } } } label: {
-                            Color.clear.frame(width: 16, height: 16)
-                                .glass(tint: store.running ? .green : .red, interactive: true, in: Circle())
-                                .padding(2).contentShape(Circle())
+            VStack {
+                HStack {
+                    Text("Monitor headphones").frame(width: 170, alignment: .leading)
+                    Picker("Monitor headphones", selection: $store.settings.monitorUID) {
+                        Text("Off — Stream Mix only").tag("")
+                        Text("Default system output").tag(Settings.defaultMonitorUID)
+                        ForEach(store.devices.filter { $0.outputs > 0 && !$0.isLoopback }) { Text($0.name).tag($0.uid) }
+                        if !store.settings.monitorUID.isEmpty && store.settings.monitorUID != Settings.defaultMonitorUID && !store.devices.contains(where: { $0.uid == store.settings.monitorUID }) {
+                            Text("Saved device unavailable").tag(store.settings.monitorUID)
                         }
-                        .buttonStyle(.plain).disabled(store.busy).keyboardShortcut(.space, modifiers: [])
-                        .help(store.running ? "Running — click to stop" : "Stopped — click to start")
-                        .accessibilityLabel(store.running ? "Running. Stop mixer" : "Stopped. Start mixer")
+                    }.labelsHidden().flexibleButtonWidth().frame(width: 280)
+                    Spacer()
+                    // Running state and Start/Stop control in one: green runs, red is stopped.
+                    Button { Task { if store.running { await store.stop() } else { await store.start() } } } label: {
+                        Color.clear.frame(width: 16, height: 16)
+                            .glass(tint: store.running ? .green : .red, interactive: true, in: Circle())
+                            .padding(2).contentShape(Circle())
                     }
-                    HStack {
-                        Text("Stream Mix virtual input").frame(width: 170, alignment: .leading)
-                        // Loaded: status only; reinstall is in the Mixoto menu.
-                        if let device = store.devices.first(where: \.isStreamMix) {
-                            StreamMixName(current: device.name) { store.renameStreamMix($0) }
-                            Image(systemName: "checkmark.circle.fill").symbolRenderingMode(.multicolor).help("Installed and loaded")
-                        } else {
-                            Text(FileManager.default.fileExists(atPath: "/Library/Audio/Plug-Ins/HAL/MixotoAudio.driver") ? "Installed, not loaded" : "Not installed")
-                                .foregroundStyle(.secondary)
-                            Button("Install…") { Task { await store.installVirtualDevice() } }.glassButton(prominent: true)
-                        }
-                        Spacer()
+                    .buttonStyle(.plain).disabled(store.busy).keyboardShortcut(.space, modifiers: [])
+                    .help(store.running ? "Running — click to stop" : "Stopped — click to start")
+                    .accessibilityLabel(store.running ? "Running. Stop mixer" : "Stopped. Start mixer")
+                }
+                HStack {
+                    Text("Stream Mix virtual input").frame(width: 170, alignment: .leading)
+                    // Loaded: status only; reinstall is in the Mixoto menu.
+                    if let device = store.devices.first(where: \.isStreamMix) {
+                        StreamMixName(current: device.name) { store.renameStreamMix($0) }
+                        Image(systemName: "checkmark.circle.fill").symbolRenderingMode(.multicolor).help("Installed and loaded")
+                    } else {
+                        Text(FileManager.default.fileExists(atPath: "/Library/Audio/Plug-Ins/HAL/MixotoAudio.driver") ? "Installed, not loaded" : "Not installed")
+                            .foregroundStyle(.secondary)
+                        Button("Install…") { Task { await store.installVirtualDevice() } }.glassButton(prominent: true)
                     }
-                }.disabled(store.busy)
-            }
+                    Spacer()
+                }
+            }.disabled(store.busy)
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach($store.settings.channels) { $channel in strip($channel) }

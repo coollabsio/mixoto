@@ -183,3 +183,42 @@ Debug icon now uses plain styling, without glass/background/border. Native
 Button semantics preserve activation/accessibility. 27 tests, release build,
 signatures, and native launch pass. Manual visual/popover check remains. GitHub
 issues/discussions unavailable: no Git remote; no external matches claimed.
+
+## Plain output rows
+
+- [x] Remove the Outputs title and shared background; keep both rows and controls.
+- [x] Run Swift tests and release build; check GitHub search availability.
+
+### Plain output rows review
+
+Removed only the outer GroupBox. Both output rows, field backgrounds, status,
+and Start/Stop behavior remain unchanged. 27 Swift tests and release app build
+pass; diff whitespace check passes. Visual check remains manual. GitHub issue
+and discussion search is unavailable because no Git remote is configured.
+No fully fixed, related, or similar external item is claimed.
+
+## New channel volume
+
+- [x] Set both default channel volumes to 100%; preserve saved volumes.
+- [x] Add a default-volume test, run tests and release build, and check repository discovery.
+
+### New channel volume review
+
+Channel defaults are 1 for both buses. Saved values and explicit volumes are
+unchanged. 28 tests pass, including new default-volume and existing persistence
+tests. Release app build and diff whitespace check pass. GitHub issue/discussion
+search is unavailable: no Git remote. No fully fixed, related, or similar
+external item is claimed.
+
+## Pixel SVG icon
+
+- [x] Create a purple pixel-grid symbol: three audio bars merge into one output, not an M.
+- [x] Save mixoto-icon.svg in the project root; validate and render the SVG.
+
+### Pixel SVG icon review
+
+Saved mixoto-icon.svg in the project root. Uses a 32-unit grid, three purple
+input bars and a single output on charcoal. XML validation, native Quick Look
+render, visual inspection, and whitespace check pass. App packaging is unchanged.
+GitHub issue/discussion search unavailable: no Git remote; no fully fixed,
+related, or similar external item claimed.

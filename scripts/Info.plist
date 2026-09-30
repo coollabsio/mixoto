@@ -4,6 +4,9 @@
 <key>CFBundleExecutable</key><string>Mixoto</string>
 <key>CFBundleIdentifier</key><string>local.mixoto.app</string>
 <key>CFBundleName</key><string>Mixoto</string>
+<key>CFBundleDisplayName</key><string>Mixoto</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundleIconName</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.2.0</string>
 <key>CFBundleVersion</key><string>2</string>

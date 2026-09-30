@@ -14,6 +14,10 @@ rtk proxy sh scripts/build-app.sh
 rtk proxy open artifacts/Mixoto.app
 ```
 
+The app icon source is `Resources/AppIcon.svg`. After you change it, run
+`sh scripts/build-icon.sh` (needs ImageMagick) to regenerate
+`Resources/AppIcon.icns` (macOS 15) and `Resources/Assets.car` (macOS 26+).
+
 The build needs Xcode or compatible Swift tools. Verification uses Swift 6.4,
 the installed macOS 27 SDK, and a macOS 26.6.2 runtime. APIs require macOS 15 or
 later; other macOS versions were not tested. Use the app bundle, not the raw

@@ -5,8 +5,8 @@ struct Channel: Identifiable, Codable, Equatable {
     var name = "New channel"
     // app:<bundle ID>, mic:<device UID>, or system; empty means unassigned.
     var source = ""
-    var monitor: Float = 0.7
-    var stream: Float = 0.7
+    var monitor: Float = 1
+    var stream: Float = 1
     var monitorMuted = false
     var streamMuted = false
     var monitorGain: Float { monitorMuted ? 0 : Self.safeGain(monitor) }

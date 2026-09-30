@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Mixoto app icon</title>
+  <desc>macOS app icon: pixel mixer from mixoto-icon.svg on Apple's 824 px icon grid.</desc>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#000"/>
+  <!-- 15x15 pixel grid, 48 px per pixel, centered: 15 * 48 = 720 -->
+  <g transform="translate(152 152) scale(48)" shape-rendering="crispEdges">
+    <!-- shadow: glyph shifted half a pixel down-right, like the Jean icon -->
+    <g transform="translate(0.5 0.5)" fill="#48307a">
+      <path d="M3 3h1v9H3zM7 3h1v9H7zM11 3h1v9h-1z"/>
+      <path d="M2 8h3v2H2zM6 4h3v2H6zM10 6h3v2h-3z"/>
+    </g>
+    <path d="M3 3h1v9H3zM7 3h1v9H7zM11 3h1v9h-1z" fill="#3a2766"/>
+    <path d="M3 10h1v2H3zM7 6h1v6H7zM11 8h1v4h-1z" fill="#9d6bff"/>
+    <path d="M2 8h3v2H2zM6 4h3v2H6zM10 6h3v2h-3z" fill="#9d6bff"/>
+  </g>
+</svg>
