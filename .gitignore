@@ -2,3 +2,5 @@
 .DS_Store
 artifacts/
 __pycache__/
+
+.ai/todo.md
