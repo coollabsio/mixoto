@@ -55,3 +55,8 @@
 - Do not put the local `rtk` wrapper in repository scripts or README commands.
   CI runners and other developers do not have it. Use plain commands in files;
   use `rtk` only in your own shell calls.
+
+- User version correction, 2026-09-30: The next app release is 0.0.2, not
+  0.2.0. Use the requested release version for both app version fields.
+  Check repository variable/secret names before assuming how the user stored
+  update keys; the public key can safely be supplied from either location.

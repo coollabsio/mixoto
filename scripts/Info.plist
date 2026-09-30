@@ -8,8 +8,13 @@
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIconName</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.2.0</string>
-<key>CFBundleVersion</key><string>2</string>
+<key>CFBundleShortVersionString</key><string>0.0.2</string>
+<key>CFBundleVersion</key><string>0.0.2</string>
+<key>SUFeedURL</key><string>https://github.com/coollabsio/Mixoto/releases/latest/download/appcast.xml</string>
+<key>SUEnableAutomaticChecks</key><true/>
+<key>SUAutomaticallyUpdate</key><false/>
+<key>SUVerifyUpdateBeforeExtraction</key><true/>
+<key>SURequireSignedFeed</key><true/>
 <key>LSMinimumSystemVersion</key><string>15.0</string>
 <key>NSMicrophoneUsageDescription</key><string>Send the selected microphone to your Monitor and Stream mixes.</string>
 <key>NSAudioCaptureUsageDescription</key><string>Capture selected application audio for your Monitor and Stream mixes.</string>

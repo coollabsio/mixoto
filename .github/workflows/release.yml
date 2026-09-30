@@ -20,6 +20,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Check update signing configuration
+        env:
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY || secrets.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          test -n "$SPARKLE_PUBLIC_ED_KEY" || { echo 'Set the SPARKLE_PUBLIC_ED_KEY repository variable or secret.'; exit 1; }
+          test -n "$SPARKLE_PRIVATE_ED_KEY" || { echo 'Set the SPARKLE_PRIVATE_ED_KEY repository secret.'; exit 1; }
+
       - name: Resolve release version
         id: version
         env:
@@ -36,6 +44,7 @@ jobs:
         run: |
           swift test
           sh scripts/test-driver.sh
+          sh scripts/test-updater.sh
 
       - name: Import signing certificate
         env:
@@ -58,6 +67,7 @@ jobs:
         env:
           SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           VERSION: ${{ steps.version.outputs.version }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY || secrets.SPARKLE_PUBLIC_ED_KEY }}
         run: sh scripts/build-app.sh
 
       - name: Package, notarize and staple DMG
@@ -69,7 +79,14 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: sh scripts/package-dmg.sh
 
-      - name: Upload DMG to release
+      - name: Generate signed update feed
+        env:
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: sh scripts/generate-appcast.sh
+
+      - name: Upload DMG and update feed to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
@@ -77,7 +94,7 @@ jobs:
         run: |
           # Manual runs create a draft release when none exists yet.
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --title "$TAG" --generate-notes
-          gh release upload "$TAG" "artifacts/Mixoto_${VERSION}_universal.dmg" --clobber
+          gh release upload "$TAG" "artifacts/Mixoto_${VERSION}_universal.dmg" artifacts/appcast.xml --clobber
 
       - name: Remove signing keychain
         if: always()

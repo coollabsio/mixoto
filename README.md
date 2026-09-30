@@ -25,4 +25,5 @@ Use headphones to prevent microphone feedback. Live audio routing is not yet ful
 
 - [Virtual device setup and removal](docs/virtual-device.md)
 - [Verification](docs/verification.md)
+- [App updates and release setup](docs/updates.md)
 - [Driver and license](Driver/README.md)

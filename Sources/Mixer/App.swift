@@ -147,6 +147,7 @@ final class MixerStore: ObservableObject {
 @main
 struct MixotoApp: App {
     @StateObject private var store = MixerStore()
+    @StateObject private var updater = AppUpdater()
     var body: some Scene {
         WindowGroup("Mixoto") {
             MixerView(store: store)
@@ -155,6 +156,12 @@ struct MixotoApp: App {
         }
         .commands {
             CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates || store.busy)
+                Toggle("Check for Updates Automatically", isOn: Binding(
+                    get: { updater.automaticallyChecksForUpdates },
+                    set: { updater.setAutomaticChecks($0) }
+                )).disabled(!updater.isAvailable)
                 Button("Reinstall Virtual Device…") { Task { await store.installVirtualDevice() } }.disabled(store.busy)
             }
         }
