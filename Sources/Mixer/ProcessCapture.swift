@@ -85,6 +85,10 @@ final class ProcessCapture: @unchecked Sendable {
     init(receive: @escaping (AVAudioPCMBuffer) -> Void, failure: @escaping (String) -> Void) {
         self.receive = receive; self.failure = failure
     }
+    var latency: Double {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        return aggregateID == 0 ? 0 : Devices.latency(aggregateID, input: true)
+    }
     var isHealthy: Bool {
         lifecycleLock.lock(); defer { lifecycleLock.unlock() }
         guard started, aggregateID != 0,

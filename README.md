@@ -21,6 +21,8 @@ Requires macOS 15+ and Xcode or compatible Swift tools.
 2. Add an app or microphone channel. Grant recording access when prompted.
 3. Select headphones for Monitor and **Mixoto Stream Mix** as the input in your recording or call app.
 
+Microphone channels have an effects button: **Low Cut** (80 or 120 Hz), **Voice Focus** (Apple's on-device voice isolation; adds about 60 ms of delay), and **Clipguard** on an Elgato Wave:3. The Wave:3 forgets Clipguard when unplugged; Mixoto sends it again when the microphone starts.
+
 Use headphones to prevent microphone feedback. Live audio routing is not yet fully verified.
 
 ## Docs

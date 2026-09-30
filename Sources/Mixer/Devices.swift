@@ -94,6 +94,27 @@ enum Devices {
         var value = name as CFString
         try check(AudioObjectSetPropertyData(device.id, &address, 0, nil, UInt32(MemoryLayout<CFString>.size), &value))
     }
+    private static func value<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope, _ empty: T) -> T {
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+        var result = empty, size = UInt32(MemoryLayout<T>.size)
+        return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &result) == noErr ? result : empty
+    }
+    // Duration of one I/O buffer in seconds; 0 when the device does not report it.
+    static func bufferDuration(_ id: AudioDeviceID) -> Double {
+        let rate = value(id, kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal, Float64(0))
+        return rate > 0 ? Double(value(id, kAudioDevicePropertyBufferFrameSize, kAudioObjectPropertyScopeGlobal, UInt32(0))) / rate : 0
+    }
+    // Hardware delay of one direction in seconds: device and stream latency,
+    // safety offset, and one I/O buffer. 0 when the device does not report it.
+    static func latency(_ id: AudioDeviceID, input: Bool) -> Double {
+        let scope = input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput
+        var frames = value(id, kAudioDevicePropertyLatency, scope, UInt32(0)) + value(id, kAudioDevicePropertySafetyOffset, scope, UInt32(0))
+            + value(id, kAudioDevicePropertyBufferFrameSize, kAudioObjectPropertyScopeGlobal, UInt32(0))
+        let stream = value(id, kAudioDevicePropertyStreams, scope, AudioStreamID(0))
+        if stream != 0 { frames += value(stream, kAudioStreamPropertyLatency, kAudioObjectPropertyScopeGlobal, UInt32(0)) }
+        let rate = value(id, kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal, Float64(0))
+        return rate > 0 ? Double(frames) / rate : 0
+    }
     static func check(_ status: OSStatus) throws {
         guard status == noErr else { throw MixerError.message("Core Audio error: \(status).") }
     }

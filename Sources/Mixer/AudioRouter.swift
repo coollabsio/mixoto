@@ -12,9 +12,16 @@ final class OutputBus {
     private var received = 0
     let device: Device?
     private let monitor: Bool
+    private let outputBuffer: Double
     static let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
     var droppedBlocks: Int { lock.lock(); defer { lock.unlock() }; return dropped }
     var receivedBlocks: Int { lock.lock(); defer { lock.unlock() }; return received }
+    // Audio of a channel waiting in its player, plus the output device delay.
+    func latency(_ channel: UUID) -> Double? {
+        lock.lock(); defer { lock.unlock() }
+        guard let budget = budgets[channel] else { return nil }
+        return budget.queued + (device.map { Devices.latency($0.id, input: false) } ?? 0)
+    }
     var isHealthy: Bool {
         lock.lock(); defer { lock.unlock() }
         guard active, engine.isRunning else { return false }
@@ -27,6 +34,7 @@ final class OutputBus {
 
     init(device: Device?, channels: [Channel], monitor: Bool) throws {
         self.device = device; self.monitor = monitor
+        outputBuffer = device.map { Devices.bufferDuration($0.id) } ?? 0
         if let device {
             try Devices.select(device, node: engine.outputNode)
         } else {
@@ -83,7 +91,7 @@ final class OutputBus {
         guard active, let player = players[channel], let budget = budgets[channel] else { return }
         received += 1
         let duration = Double(buffer.frameLength) / buffer.format.sampleRate
-        guard budget.reserve(duration) else { dropped += 1; return }
+        guard budget.reserve(duration, limit: queueLimit(block: duration, outputBuffer: outputBuffer)) else { dropped += 1; return }
         player.scheduleBuffer(buffer, completionCallbackType: .dataRendered) { _ in budget.release(duration) }
     }
     func stop() {
@@ -96,10 +104,27 @@ final class OutputBus {
 }
 
 // Converter is used only by one microphone sink. AVAudioEngine supplies hardware format.
+// Input -> Low Cut -> Voice Focus -> sink. Low Cut stays in the graph and is
+// bypassed when off. Voice Focus uses about 13 MB, so it is in the graph only
+// while on; turning it on or off restarts the capture.
 final class MicrophoneCapture {
     private let engine = AVAudioEngine()
+    private let lowCut = AVAudioUnitEQ(numberOfBands: 2)
+    private let voiceFocus: AVAudioUnitEffect?
     private var selectedDevice: Device?
     private var selectedFormat: AVAudioFormat?
+    private var clipguard: Bool?
+    // Apple's on-device voice isolation (macOS 13+). Adds about 56 ms delay while on.
+    static let voiceFocusComponent = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_AUSoundIsolation,
+                                                               componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
+    static let voiceFocusAvailable = !AVAudioUnitComponentManager.shared().components(matching: voiceFocusComponent).isEmpty
+    init(voiceFocus: Bool) {
+        // Two 12 dB/octave high-pass bands give a steep 24 dB/octave low cut.
+        for band in lowCut.bands { band.filterType = .highPass; band.bypass = false }
+        lowCut.bypass = true
+        self.voiceFocus = voiceFocus && Self.voiceFocusAvailable ? AVAudioUnitEffect(audioComponentDescription: Self.voiceFocusComponent) : nil
+        self.voiceFocus?.auAudioUnit.parameterTree?.parameter(withAddress: AUParameterAddress(kAUSoundIsolationParam_SoundToIsolate))?.value = AUValue(kAUSoundIsolationSoundType_Voice)
+    }
     var isHealthy: Bool {
         guard engine.isRunning, let selectedDevice, let selectedFormat,
               let unit = engine.inputNode.audioUnit else { return false }
@@ -126,10 +151,26 @@ final class MicrophoneCapture {
             catch { reportedFailure = true; failure(error.localizedDescription) }
             return noErr
         }
-        engine.attach(sink)
-        engine.connect(input, to: sink, format: format)
+        let chain = [input, lowCut] + [voiceFocus].compactMap { $0 } + [sink]
+        chain.dropFirst().forEach(engine.attach)
+        for (source, destination) in zip(chain, chain.dropFirst()) { engine.connect(source, to: destination, format: format) }
         engine.prepare()
         try engine.start()
+    }
+    // Applies the channel's microphone settings. Clipguard is sent to a
+    // Wave:3 only when it changes or the microphone starts again.
+    func update(_ channel: Channel) throws {
+        for band in lowCut.bands { band.frequency = Float(max(20, channel.lowCut)) }
+        lowCut.bypass = channel.lowCut <= 0
+        voiceFocus?.auAudioUnit.parameterTree?.parameter(withAddress: AUParameterAddress(kAUSoundIsolationParam_WetDryMixPercent))?.value = Channel.voiceFocusMix(channel.voiceFocusStrength)
+        if let wanted = channel.clipguard, wanted != clipguard, let device = selectedDevice, Wave3.serial(device) != nil {
+            try Wave3.setClipguard(wanted, device: device)
+            clipguard = wanted
+        }
+    }
+    // Input device delay plus effect delay (Voice Focus reports about 56 ms).
+    var latency: Double {
+        (selectedDevice.map { Devices.latency($0.id, input: true) } ?? 0) + lowCut.latency + (voiceFocus?.latency ?? 0)
     }
     func stop() { engine.stop() }
     deinit { stop() }
@@ -175,6 +216,7 @@ final class AudioRouter {
     private enum Capture {
         case app(ProcessCapture), mic(MicrophoneCapture)
         var isHealthy: Bool { switch self { case .app(let c): c.isHealthy; case .mic(let c): c.isHealthy } }
+        var latency: Double { switch self { case .app(let c): c.latency; case .mic(let c): c.latency } }
         func stop() { switch self { case .app(let c): c.stop(); case .mic(let c): c.stop() } }
     }
     private var monitor: OutputBus?
@@ -184,6 +226,11 @@ final class AudioRouter {
     var droppedBlocks: Int { max(monitor?.droppedBlocks ?? 0, stream?.droppedBlocks ?? 0) }
     var receivedBlocks: Int { monitor?.receivedBlocks ?? stream?.receivedBlocks ?? 0 }
     func level(_ channel: UUID) -> Float { buses.level(channel) }
+    // Estimated delay from a channel's input to each output, in seconds.
+    func latency(_ channel: UUID) -> Latency? {
+        guard let input = captures[channel]?.capture.latency else { return nil }
+        return Latency(monitor: monitor?.latency(channel).map { input + $0 }, stream: stream?.latency(channel).map { input + $0 })
+    }
     var isHealthy: Bool { (monitor?.isHealthy ?? true) && (stream?.isHealthy ?? true) && captures.values.allSatisfy(\.capture.isHealthy) }
 
     // Brings the running graph to the settings without a full stop. Unchanged
@@ -224,6 +271,10 @@ final class AudioRouter {
                 problems.append("\(settings.channels.first(where: { $0.id == id })?.name ?? "Channel"): waiting for the app to play audio.")
             } else { wanted[id] = source + "|" + objects.map(String.init).joined(separator: ",") }
         }
+        // The key changes with Voice Focus, so turning it on or off rebuilds the capture.
+        for channel in settings.channels where channel.voiceFocus && MicrophoneCapture.voiceFocusAvailable {
+            if let source = wanted[channel.id], source.hasPrefix("mic:") { wanted[channel.id] = source + "|voice-focus" }
+        }
         if let id = wanted.first(where: { $0.value == Channel.system })?.key {
             let excluded = processes.filter { process in
                 process.pid == getpid() || owned.contains { Devices.belongs(process.bundle, to: $0) }
@@ -255,11 +306,12 @@ final class AudioRouter {
                     try await capture.start(processes: members.map(\.id), pids: members.map(\.pid).filter { $0 > 0 })
                     captures[id] = (source, .app(capture))
                 } else {
-                    guard let device = devices.first(where: { $0.uid == String(source.dropFirst(4)) && $0.inputs > 0 && !$0.isLoopback }) else {
+                    let uid = source.dropFirst(4).split(separator: "|").first.map(String.init)
+                    guard let device = devices.first(where: { $0.uid == uid && $0.inputs > 0 && !$0.isLoopback }) else {
                         throw MixerError.message("The microphone is not available.")
                     }
                     guard await AVCaptureDevice.requestAccess(for: .audio) else { throw MixerError.message("Microphone permission was denied. Open System Settings > Privacy & Security.") }
-                    let microphone = MicrophoneCapture()
+                    let microphone = MicrophoneCapture(voiceFocus: source.hasSuffix("|voice-focus"))
                     try microphone.start(device: device, receive: receive, failure: failure)
                     captures[id] = (source, .mic(microphone))
                 }
@@ -267,6 +319,10 @@ final class AudioRouter {
                 let name = settings.channels.first(where: { $0.id == id })?.name ?? "Channel"
                 problems.append("\(name): \(error.localizedDescription)")
             }
+        }
+        for channel in settings.channels {
+            guard case .mic(let microphone)? = captures[channel.id]?.capture else { continue }
+            do { try microphone.update(channel) } catch { problems.append("\(channel.name): \(error.localizedDescription)") }
         }
         return problems
     }

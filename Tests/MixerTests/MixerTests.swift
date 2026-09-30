@@ -1,5 +1,6 @@
 import XCTest
 import AVFoundation
+import CoreAudio
 @testable import Mixer
 
 final class MixerTests: XCTestCase {
@@ -112,6 +113,56 @@ final class MixerTests: XCTestCase {
         XCTAssertEqual(decoded.monitorUID, "headphones")
         XCTAssertEqual(decoded.streamUID, "loopback")
     }
+    func testMicrophoneEffectsPersistAndOlderSettingsKeepDefaults() throws {
+        var channel = Channel(name: "Mic", source: "mic:wave", monitor: 0.5)
+        channel.lowCut = 120; channel.voiceFocus = true; channel.voiceFocusStrength = 0.3; channel.clipguard = false
+        XCTAssertEqual(try JSONDecoder().decode(Channel.self, from: JSONEncoder().encode(channel)), channel)
+        // Saved by a version without microphone effects.
+        let old = #"{"id":"\#(channel.id.uuidString)","name":"Mic","source":"mic:wave","monitor":0.5,"stream":1,"monitorMuted":false,"streamMuted":true}"#
+        let decoded = try JSONDecoder().decode(Channel.self, from: Data(old.utf8))
+        XCTAssertEqual(decoded.id, channel.id)
+        XCTAssertEqual(decoded.monitor, 0.5)
+        XCTAssertTrue(decoded.streamMuted)
+        XCTAssertEqual(decoded.lowCut, 0)
+        XCTAssertFalse(decoded.voiceFocus)
+        XCTAssertEqual(decoded.voiceFocusStrength, 0.7)
+        XCTAssertNil(decoded.clipguard)
+    }
+    func testVoiceFocusMixCoversFullRange() {
+        XCTAssertEqual(Channel.voiceFocusMix(0), 0, accuracy: 0.001)
+        XCTAssertEqual(Channel.voiceFocusMix(1), 100, accuracy: 0.001)
+        XCTAssertEqual(Channel.voiceFocusMix(0.5), 90.9, accuracy: 0.1)
+        XCTAssertEqual(Channel.voiceFocusMix(.nan), 0, accuracy: 0.001)
+        XCTAssertEqual(Channel.voiceFocusMix(2), 100, accuracy: 0.001)
+    }
+    func testWave3IsFoundByCoreAudioUID() {
+        let wave = Device(id: 1, uid: "AppleUSBAudioEngine:Elgato Systems:Elgato Wave:3:BS16J1A00192:2,1", name: "Elgato Wave:3", inputs: 1, outputs: 2)
+        XCTAssertEqual(Wave3.serial(wave), "BS16J1A00192")
+        let other = Device(id: 2, uid: "AppleUSBAudioEngine:Elgato Systems:Elgato Wave XLR:X:1", name: "Wave XLR", inputs: 1, outputs: 2)
+        XCTAssertNil(Wave3.serial(other))
+    }
+    func testWave3StateDecodesTheSettingsBlock() {
+        // Read from a real Wave:3 (protocol 5.3).
+        let state = Wave3.State(config: [0x80, 0x19, 0x00, 0xec, 0x01, 0x01, 0x00, 0x00, 0xe7, 0x00, 0x00, 0x05, 0x01, 0x00, 0x00, 0x00])
+        XCTAssertEqual(state.gain, 25.5)
+        XCTAssertTrue(state.muted)
+        XCTAssertTrue(state.clipguard)
+        XCTAssertFalse(state.lowCut)
+        XCTAssertEqual(state.headphones, -25)
+        XCTAssertFalse(state.headphonesMuted)
+        XCTAssertEqual(state.computerMix, 5)
+        XCTAssertEqual(state.dial, "Mic gain")
+    }
+    func testLatencyShowsQueuedAudioInMilliseconds() {
+        let budget = QueueBudget()
+        XCTAssertTrue(budget.reserve(0.02)); XCTAssertTrue(budget.reserve(0.01))
+        XCTAssertEqual(budget.queued, 0.03, accuracy: 0.000_001)
+        budget.release(0.02)
+        XCTAssertEqual(budget.queued, 0.01, accuracy: 0.000_001)
+        XCTAssertEqual(MixerView.milliseconds(0.0564), "56 ms")
+        XCTAssertEqual(MixerView.milliseconds(nil), "—")
+        XCTAssertEqual(Devices.latency(AudioObjectID(kAudioObjectUnknown), input: true), 0)
+    }
     func testLegacyDriverIsNotASelectableSourceOrMixotoOutput() {
         let legacy = Device(id: 1, uid: "local.openmixer.stream-mix", name: "Custom name", inputs: 2, outputs: 2)
         XCTAssertTrue(legacy.isLoopback)
@@ -172,6 +223,17 @@ final class MixerTests: XCTestCase {
         XCTAssertTrue(Devices.belongs("net.imput.helium.helper", to: "net.imput.helium"))
         XCTAssertFalse(Devices.belongs("net.imput.heliumx", to: "net.imput.helium"))
         XCTAssertFalse(Devices.belongs("com.apple.WebKit.GPU", to: "com.apple.Safari"))
+    }
+    func testQueueLimitDropsBacklogAboveDeviceNeeds() {
+        let budget = QueueBudget()
+        let block = 512.0 / 48_000, limit = queueLimit(block: block, outputBuffer: block)
+        XCTAssertEqual(limit * 1000, 37, accuracy: 0.1)
+        // A late output: blocks keep arriving, none are played yet.
+        let accepted = (0..<20).filter { _ in budget.reserve(block, limit: limit) }.count
+        XCTAssertEqual(accepted, 3)
+        XCTAssertLessThanOrEqual(budget.queued, limit)
+        // The default 200 ms limit still applies when a bus gives a larger one.
+        XCTAssertFalse(QueueBudget(limit: 0.02).reserve(0.03, limit: 1))
     }
     func testQueueBudget() {
         let budget = QueueBudget(limit: 0.1)

@@ -67,3 +67,8 @@
 - User correction, 2026-09-30: The menu bar icon must use the same three-fader
   design as the app icon, not a generic waveform. Use a monochrome template
   without the app tile/background so macOS can adapt it to the menu bar.
+
+- User correction, 2026-09-30: A feature was "missing" because the running
+  `artifacts/Mixoto.app` was an old bundle; only `swift build` had run. After
+  UI/app changes, run `sh scripts/build-app.sh`, confirm the binary timestamp
+  is newer than the sources, and say whether the running app must restart.
