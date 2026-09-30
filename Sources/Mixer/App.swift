@@ -253,11 +253,11 @@ struct MixerView: View {
                 HStack {
                     Text("Monitor headphones").frame(width: 170, alignment: .leading)
                     Picker("Monitor headphones", selection: $store.settings.monitorUID) {
-                        Text("Off — Stream Mix only").tag("")
+                        Text("Off - Stream Mix only").tag("")
                         Text("Default system output").tag(Settings.defaultMonitorUID)
                         ForEach(store.devices.filter { $0.outputs > 0 && !$0.isLoopback }) { Text($0.name).tag($0.uid) }
                         if !store.settings.monitorUID.isEmpty && store.settings.monitorUID != Settings.defaultMonitorUID && !store.devices.contains(where: { $0.uid == store.settings.monitorUID }) {
-                            Text("Saved device unavailable").tag(store.settings.monitorUID)
+                            Text("Saved device - not available").tag(store.settings.monitorUID)
                         }
                     }.labelsHidden().flexibleButtonWidth().frame(width: 280)
                     Spacer()
@@ -268,7 +268,7 @@ struct MixerView: View {
                             .padding(2).contentShape(Circle())
                     }
                     .buttonStyle(.plain).disabled(store.busy).keyboardShortcut(.space, modifiers: [])
-                    .help(store.running ? "Running — click to stop" : "Stopped — click to start")
+                    .help(store.running ? "Running - click to stop" : "Stopped - click to start")
                     .accessibilityLabel(store.running ? "Running. Stop mixer" : "Stopped. Start mixer")
                 }
                 HStack {
@@ -342,7 +342,16 @@ struct MixerView: View {
         .onChange(of: store.settings.monitorUID) { _, _ in store.changed() }
         .onChange(of: store.settings.streamUID) { _, _ in store.save() }
     }
-    static func milliseconds(_ seconds: Double?) -> String { seconds.map { "\(Int(($0 * 1000).rounded())) ms" } ?? "—" }
+    static func milliseconds(_ seconds: Double?) -> String { seconds.map { "\(Int(($0 * 1000).rounded())) ms" } ?? "-" }
+    // "App: Helium - not available". Settings from older versions have no saved
+    // source name: use the installed app's name, or the channel name.
+    static func unavailableLabel(_ channel: Channel) -> String {
+        let bundle = channel.source.hasPrefix("app:") ? String(channel.source.dropFirst(4)) : nil
+        let installed = bundle.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+            .map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") }
+        let name = !channel.sourceName.isEmpty ? channel.sourceName : installed ?? channel.name
+        return "\(bundle == nil ? "Mic" : "App"): \(name) - not available"
+    }
     private func sourceName(_ source: String) -> String? {
         if source.hasPrefix("app:") { return store.apps.first { "app:\($0.bundleIdentifier)" == source }?.name }
         if source.hasPrefix("mic:") { return store.devices.first { "mic:\($0.uid)" == source }?.name }
@@ -365,11 +374,12 @@ struct MixerView: View {
                         channel.wrappedValue.name = sourceName(source) ?? Channel().name
                     }
                     channel.wrappedValue.source = source
+                    channel.wrappedValue.sourceName = sourceName(source) ?? ""
                 })) {
                     Text("Unassigned").tag("")
                     ForEach(store.devices.filter { $0.inputs > 0 && !$0.isLoopback }) { Text("Mic: \($0.name)").tag("mic:\($0.uid)") }
                     ForEach(store.apps, id: \.bundleIdentifier) { Text("App: \($0.name)").tag("app:\($0.bundleIdentifier)") }
-                    if !value.source.isEmpty && !availableSources.contains(value.source) { Text("Saved source — not available").tag(value.source) }
+                    if !value.source.isEmpty && !availableSources.contains(value.source) { Text(Self.unavailableLabel(value)).tag(value.source) }
                 }.labelsHidden().flexibleButtonWidth()
             }
             HStack(spacing: 14) {

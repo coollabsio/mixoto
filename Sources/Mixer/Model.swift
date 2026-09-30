@@ -5,6 +5,8 @@ struct Channel: Identifiable, Codable, Equatable {
     var name = "New channel"
     // app:<bundle ID>, mic:<device UID>, or system; empty means unassigned.
     var source = ""
+    // Source name when it was chosen; shown while the source is not available.
+    var sourceName = ""
     var monitor: Float = 1
     var stream: Float = 1
     var monitorMuted = false
@@ -36,7 +38,7 @@ extension Channel {
         func load<T: Decodable>(_ key: CodingKeys, _ value: inout T) throws {
             value = try values.decodeIfPresent(T.self, forKey: key) ?? value
         }
-        try load(.id, &id); try load(.name, &name); try load(.source, &source)
+        try load(.id, &id); try load(.name, &name); try load(.source, &source); try load(.sourceName, &sourceName)
         try load(.monitor, &monitor); try load(.stream, &stream)
         try load(.monitorMuted, &monitorMuted); try load(.streamMuted, &streamMuted)
         try load(.lowCut, &lowCut); try load(.voiceFocus, &voiceFocus); try load(.voiceFocusStrength, &voiceFocusStrength)

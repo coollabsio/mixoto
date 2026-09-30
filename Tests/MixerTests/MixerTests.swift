@@ -160,8 +160,18 @@ final class MixerTests: XCTestCase {
         budget.release(0.02)
         XCTAssertEqual(budget.queued, 0.01, accuracy: 0.000_001)
         XCTAssertEqual(MixerView.milliseconds(0.0564), "56 ms")
-        XCTAssertEqual(MixerView.milliseconds(nil), "—")
+        XCTAssertEqual(MixerView.milliseconds(nil), "-")
         XCTAssertEqual(Devices.latency(AudioObjectID(kAudioObjectUnknown), input: true), 0)
+    }
+    func testUnavailableSourceShowsItsSavedName() {
+        var mic = Channel(name: "Voice", source: "mic:gone")
+        XCTAssertEqual(MixerView.unavailableLabel(mic), "Mic: Voice - not available")
+        mic.sourceName = "Elgato Wave:3"
+        XCTAssertEqual(MixerView.unavailableLabel(mic), "Mic: Elgato Wave:3 - not available")
+        XCTAssertEqual(try JSONDecoder().decode(Channel.self, from: JSONEncoder().encode(mic)).sourceName, "Elgato Wave:3")
+        // An installed app that is not running: its name comes from the bundle ID.
+        let finder = Channel(name: "Files", source: "app:com.apple.finder")
+        XCTAssertEqual(MixerView.unavailableLabel(finder), "App: Finder - not available")
     }
     func testLegacyDriverIsNotASelectableSourceOrMixotoOutput() {
         let legacy = Device(id: 1, uid: "local.openmixer.stream-mix", name: "Custom name", inputs: 2, outputs: 2)

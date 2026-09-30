@@ -72,3 +72,7 @@
   `artifacts/Mixoto.app` was an old bundle; only `swift build` had run. After
   UI/app changes, run `sh scripts/build-app.sh`, confirm the binary timestamp
   is newer than the sources, and say whether the running app must restart.
+
+- User correction, 2026-09-30: Do not use the long dash (—) in UI text; use a
+  plain hyphen with spaces (" - "). For unavailable saved sources, show the
+  saved name, for example "App: Helium - not available", not a generic label.
