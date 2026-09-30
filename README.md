@@ -11,15 +11,6 @@ open artifacts/Mixoto.app
 
 Requires macOS 15+ and Xcode or compatible Swift tools.
 
-### Release
-
-Publish a GitHub release with a `v1.2.3` tag, or run the **Release Mixoto**
-workflow manually. `.github/workflows/release.yml` runs the tests, builds a
-universal app signed with the Developer ID certificate, and uploads
-`Mixoto_<version>_universal.dmg` after Apple notarizes it. It uses the same
-organization secrets as Jean: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
-`APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID`.
-
 ## Use
 
 1. Install the bundled virtual device from the app. Administrator access is required; audio stops briefly.
