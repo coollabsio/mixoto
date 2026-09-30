@@ -60,3 +60,6 @@
   0.2.0. Use the requested release version for both app version fields.
   Check repository variable/secret names before assuming how the user stored
   update keys; the public key can safely be supplied from either location.
+
+- User correction, 2026-09-30: Use only the supplied screenshot for the README.
+  Do not add more screenshots or request more images when one is sufficient.

@@ -4,6 +4,8 @@ A native macOS audio mixer with separate Monitor and Stream controls for apps an
 
 [Download the latest release](https://github.com/coollabsio/Mixoto/releases/latest).
 
+![Mixoto mixer with separate Monitor and Stream controls for System, Mic, Klack, and Helium channels](docs/screenshots/mixer.png)
+
 ## Build and run
 
 ```sh
