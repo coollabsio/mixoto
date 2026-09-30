@@ -2,6 +2,8 @@
 
 A native macOS audio mixer with separate Monitor and Stream controls for apps and microphones. No Elgato hardware, OBS, or BlackHole is required.
 
+[Download the latest release](https://github.com/coollabsio/Mixoto/releases/latest).
+
 ## Build and run
 
 ```sh
