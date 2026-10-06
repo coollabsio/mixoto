@@ -11,6 +11,7 @@ final class MixerStore: ObservableObject {
     @Published var running = false
     @Published var busy = false
     @Published var message = ""
+    @Published var inputMessage = ""
     @Published var droppedBlocks = 0
     @Published var receivedBlocks = 0
     // Each publish updates the whole window, so counters refresh only while
@@ -56,6 +57,7 @@ final class MixerStore: ObservableObject {
         // Keep device and application lists current. A new audio process can
         // also let a waiting application channel start.
         Devices.observe(kAudioHardwarePropertyDefaultOutputDevice) { [weak self] in Task { @MainActor in self?.refreshDevices() } }
+        Devices.observe(kAudioHardwarePropertyDefaultInputDevice) { [weak self] in Task { @MainActor in self?.enforcePreferredInput() } }
         Devices.observe(kAudioHardwarePropertyDevices) { [weak self] in Task { @MainActor in self?.refreshDevices() } }
         Devices.observe(kAudioHardwarePropertyProcessObjectList) { [weak self] in Task { @MainActor in self?.refreshApps() } }
         let workspace = NSWorkspace.shared.notificationCenter
@@ -103,7 +105,20 @@ final class MixerStore: ObservableObject {
     func refreshDevices() {
         defaultOutputID = try? Devices.defaultOutputID()
         do { devices = try Devices.list() } catch { message = error.localizedDescription }
+        enforcePreferredInput()
         if running { Task { await apply() } }
+    }
+    func enforcePreferredInput() {
+        guard ProcessInfo.processInfo.environment["MIXOTO_SMOKE_REPORT"] == nil,
+              let preferred = settings.preferredInput(in: devices) else { inputMessage = ""; return }
+        do {
+            if try Devices.defaultInputID() != preferred.id { try Devices.setDefaultInput(preferred) }
+            inputMessage = ""
+        } catch { inputMessage = "Preferred input: \(error.localizedDescription)" }
+    }
+    func preferredInputChanged() {
+        save()
+        enforcePreferredInput()
     }
     func refreshApps() {
         apps = RunningApp.list()
@@ -247,6 +262,7 @@ struct MixerMenuBar: View {
 struct MixerView: View {
     @ObservedObject var store: MixerStore
     @State private var showingDebugInfo = false
+    @State private var showingPreferredInputs = false
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack {
@@ -284,6 +300,19 @@ struct MixerView: View {
                     }
                     Spacer()
                 }
+                HStack {
+                    Text("Preferred system input").frame(width: 170, alignment: .leading)
+                    Button {
+                        showingPreferredInputs.toggle()
+                    } label: {
+                        Text(preferredInputSummary).frame(width: 256, alignment: .leading)
+                    }
+                    .flexibleButtonWidth().frame(width: 280)
+                    .popover(isPresented: $showingPreferredInputs, arrowEdge: .bottom) {
+                        PreferredInputsView(store: store)
+                    }
+                    Spacer()
+                }
             }.disabled(store.busy)
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 12) {
@@ -300,7 +329,10 @@ struct MixerView: View {
                 .padding(.bottom, 8)
             }
             HStack {
-                Text(store.message).textSelection(.enabled)
+                VStack(alignment: .leading) {
+                    Text(store.message)
+                    Text(store.inputMessage)
+                }.textSelection(.enabled)
                 Spacer()
                 Button { showingDebugInfo.toggle() } label: {
                     Image(systemName: "ladybug")
@@ -341,6 +373,12 @@ struct MixerView: View {
         .onChange(of: store.settings.channels) { _, _ in store.changed() }
         .onChange(of: store.settings.monitorUID) { _, _ in store.changed() }
         .onChange(of: store.settings.streamUID) { _, _ in store.save() }
+    }
+    private var preferredInputSummary: String {
+        guard store.settings.preferredInputEnabled else { return "Off" }
+        guard let first = store.settings.preferredInputs.first else { return "No microphones selected" }
+        let suffix = store.settings.preferredInputs.count > 1 ? " + \(store.settings.preferredInputs.count - 1) fallback" : ""
+        return first.name + suffix
     }
     static func milliseconds(_ seconds: Double?) -> String { seconds.map { "\(Int(($0 * 1000).rounded())) ms" } ?? "-" }
     // "App: Helium - not available". Settings from older versions have no saved
@@ -421,6 +459,57 @@ struct MixerView: View {
                 .glassButton(prominent: muted.wrappedValue).tint(muted.wrappedValue ? .red : nil).controlSize(.small)
                 .accessibilityLabel("\(label) mute").accessibilityAddTraits(muted.wrappedValue ? .isSelected : [])
         }
+    }
+}
+
+struct PreferredInputsView: View {
+    @ObservedObject var store: MixerStore
+    private var available: [Device] {
+        store.devices.filter { device in
+            device.inputs > 0 && !device.isLoopback && !store.settings.preferredInputs.contains(where: { $0.uid == device.uid })
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle("Keep a preferred system input", isOn: Binding(
+                get: { store.settings.preferredInputEnabled },
+                set: { store.settings.preferredInputEnabled = $0; store.preferredInputChanged() }
+            ))
+            Text("Mixoto uses the first connected microphone in this list.")
+                .font(.caption).foregroundStyle(.secondary)
+            if store.settings.preferredInputs.isEmpty {
+                Text("No microphones selected").foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(store.settings.preferredInputs.enumerated()), id: \.element.uid) { index, choice in
+                    HStack {
+                        Text("\(index + 1).")
+                        Text(choice.name + (store.devices.contains(where: { $0.uid == choice.uid }) ? "" : " - not available"))
+                            .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                        Button { move(index, by: -1) } label: { Image(systemName: "chevron.up") }
+                            .disabled(index == 0).help("Move up")
+                        Button { move(index, by: 1) } label: { Image(systemName: "chevron.down") }
+                            .disabled(index == store.settings.preferredInputs.count - 1).help("Move down")
+                        Button(role: .destructive) {
+                            store.settings.preferredInputs.remove(at: index); store.preferredInputChanged()
+                        } label: { Image(systemName: "trash") }.help("Remove")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            Menu("Add microphone") {
+                ForEach(available) { device in
+                    Button(device.name) {
+                        store.settings.preferredInputs.append(PreferredInput(uid: device.uid, name: device.name))
+                        store.preferredInputChanged()
+                    }
+                }
+            }.disabled(available.isEmpty)
+        }
+        .padding(20).frame(width: 430)
+    }
+    private func move(_ index: Int, by offset: Int) {
+        store.settings.preferredInputs.swapAt(index, index + offset)
+        store.preferredInputChanged()
     }
 }
 

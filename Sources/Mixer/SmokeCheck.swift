@@ -24,6 +24,8 @@ enum SmokeCheck {
                                          "deviceCount": store.devices.count, "applicationCount": store.apps.count, "channelCount": store.settings.channels.count,
                                          "streamDeviceUID": store.settings.streamUID,
                                          "streamDeviceLoaded": store.devices.contains(where: \.isStreamMix),
+                                         "preferredInputEnabled": store.settings.preferredInputEnabled,
+                                         "preferredInputCount": store.settings.preferredInputs.count,
                                          "driverBundled": Bundle.main.url(forResource: "MixotoAudio", withExtension: "driver") != nil,
                                          "installerBundled": Bundle.main.url(forResource: "install-driver", withExtension: "sh") != nil,
                                          "running": store.running, "message": store.message]

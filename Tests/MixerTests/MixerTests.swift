@@ -74,6 +74,31 @@ final class MixerTests: XCTestCase {
             XCTAssertNil(settings.monitorDevice(in: devices, defaultOutputID: id))
         }
     }
+    func testPreferredInputUsesPriorityAndLeavesNoFallback() {
+        let desk = Device(id: 1, uid: "desk", name: "Desk microphone", inputs: 1, outputs: 0)
+        let builtIn = Device(id: 2, uid: "built-in", name: "Mac microphone", inputs: 1, outputs: 0)
+        let airPods = Device(id: 3, uid: "airpods", name: "AirPods", inputs: 1, outputs: 2)
+        let loopback = Device(id: 4, uid: Device.streamMixUID, name: "Stream Mix", inputs: 2, outputs: 2)
+        var settings = Settings(preferredInputEnabled: true, preferredInputs: [
+            PreferredInput(uid: desk.uid, name: desk.name),
+            PreferredInput(uid: builtIn.uid, name: builtIn.name)
+        ])
+        XCTAssertEqual(settings.preferredInput(in: [builtIn, airPods]), builtIn)
+        XCTAssertEqual(settings.preferredInput(in: [airPods, desk, builtIn]), desk)
+        XCTAssertNil(settings.preferredInput(in: [airPods, loopback]))
+        settings.preferredInputEnabled = false
+        XCTAssertNil(settings.preferredInput(in: [desk, builtIn]))
+    }
+    func testPreferredInputSettingsPersistAndOlderSettingsStayOff() throws {
+        let settings = Settings(preferredInputEnabled: true, preferredInputs: [PreferredInput(uid: "desk", name: "Desk microphone")])
+        let saved = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(settings))
+        XCTAssertTrue(saved.preferredInputEnabled)
+        XCTAssertEqual(saved.preferredInputs, settings.preferredInputs)
+        let old = #"{"channels":[],"monitorUID":"","streamUID":"local.mixoto.stream-mix"}"#
+        let migrated = try JSONDecoder().decode(Settings.self, from: Data(old.utf8))
+        XCTAssertFalse(migrated.preferredInputEnabled)
+        XCTAssertTrue(migrated.preferredInputs.isEmpty)
+    }
     @MainActor
     func testUnavailableDefaultMonitorDoesNotOpenHardware() async {
         let router = AudioRouter()

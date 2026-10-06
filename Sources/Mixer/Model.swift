@@ -51,6 +51,8 @@ struct Settings: Codable {
     static let defaultMonitorUID = "system-default"
     var monitorUID = ""
     var streamUID = Device.streamMixUID
+    var preferredInputEnabled = false
+    var preferredInputs: [PreferredInput] = []
     // Resolve the saved choice each time; a default selection is not a device UID.
     func monitorDevice(in devices: [Device], defaultOutputID: Device.ID?) -> Device? {
         guard !monitorUID.isEmpty else { return nil }
@@ -58,6 +60,13 @@ struct Settings: Codable {
             $0.outputs > 0 && !$0.isLoopback &&
             (monitorUID == Self.defaultMonitorUID ? $0.id == defaultOutputID : $0.uid == monitorUID)
         }
+    }
+    func preferredInput(in devices: [Device]) -> Device? {
+        guard preferredInputEnabled else { return nil }
+        for choice in preferredInputs {
+            if let device = devices.first(where: { $0.uid == choice.uid && $0.inputs > 0 && !$0.isLoopback }) { return device }
+        }
+        return nil
     }
     // Read legacy settings only when the new settings file does not exist.
     static func load(from applicationSupport: URL) -> Settings {
@@ -96,6 +105,25 @@ struct Settings: Codable {
         }
         return (sources, problems)
     }
+}
+
+extension Settings {
+    // Settings from older releases do not contain preferred-input keys.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init()
+        channels = try values.decodeIfPresent([Channel].self, forKey: .channels) ?? channels
+        monitorUID = try values.decodeIfPresent(String.self, forKey: .monitorUID) ?? monitorUID
+        streamUID = try values.decodeIfPresent(String.self, forKey: .streamUID) ?? streamUID
+        preferredInputEnabled = try values.decodeIfPresent(Bool.self, forKey: .preferredInputEnabled) ?? false
+        preferredInputs = try values.decodeIfPresent([PreferredInput].self, forKey: .preferredInputs) ?? []
+    }
+}
+
+struct PreferredInput: Codable, Equatable, Identifiable {
+    var uid: String
+    var name: String
+    var id: String { uid }
 }
 
 // Most audio a player may hold: two input blocks plus one output buffer and
