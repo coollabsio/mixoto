@@ -103,8 +103,10 @@ final class MixerStore: ObservableObject {
         }
     }
     func refreshDevices() {
+        log.info("Devices changed: refresh start")
         defaultOutputID = try? Devices.defaultOutputID()
         do { devices = try Devices.list() } catch { message = error.localizedDescription }
+        log.info("Devices refreshed: \(self.devices.map(\.name).joined(separator: ", "), privacy: .public)")
         enforcePreferredInput()
         if running { Task { await apply() } }
     }
@@ -112,7 +114,10 @@ final class MixerStore: ObservableObject {
         guard ProcessInfo.processInfo.environment["MIXOTO_SMOKE_REPORT"] == nil,
               let preferred = settings.preferredInput(in: devices) else { inputMessage = ""; return }
         do {
-            if try Devices.defaultInputID() != preferred.id { try Devices.setDefaultInput(preferred) }
+            if try Devices.defaultInputID() != preferred.id {
+                log.info("Default input reset to \(preferred.name, privacy: .public)")
+                try Devices.setDefaultInput(preferred)
+            }
             inputMessage = ""
         } catch { inputMessage = "Preferred input: \(error.localizedDescription)" }
     }
@@ -153,6 +158,7 @@ final class MixerStore: ObservableObject {
     }
     private func repairIfNeeded() async {
         guard running, !applying, !router.isHealthy else { return }
+        log.info("Router unhealthy: repair")
         if let list = try? Devices.list() { devices = list }
         defaultOutputID = try? Devices.defaultOutputID()
         await apply()

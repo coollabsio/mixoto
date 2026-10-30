@@ -1,6 +1,9 @@
 import AVFoundation
 import AudioToolbox
 import CoreAudio
+import os
+
+let log = Logger(subsystem: "io.coollabs.mixoto", category: "audio")
 
 final class OutputBus {
     private let engine = AVAudioEngine()
@@ -94,10 +97,12 @@ final class OutputBus {
         guard budget.reserve(duration, limit: queueLimit(block: duration, outputBuffer: outputBuffer)) else { dropped += 1; return }
         player.scheduleBuffer(buffer, completionCallbackType: .dataRendered) { _ in budget.release(duration) }
     }
+    // Stops the engine outside the lock: engine.stop() can wait on Core Audio,
+    // and feed() takes the lock on audio threads.
     func stop() {
-        lock.lock(); defer { lock.unlock() }
-        active = false
-        players.values.forEach { $0.stop() }
+        lock.lock(); active = false; let players = Array(players.values); lock.unlock()
+        log.debug("Output bus stop: \(self.device?.name ?? "offline", privacy: .public)")
+        players.forEach { $0.stop() }
         engine.stop()
     }
     deinit { stop() }
@@ -177,21 +182,27 @@ final class MicrophoneCapture {
 }
 
 // Audio callbacks read the current buses; the router replaces them on the main actor.
+// Only this set and the router own buses, and feed() holds the lock while it uses
+// them, so the last release of a bus is never on an audio thread. A bus released
+// there freed its AVAudioEngine, which waited on Core Audio while the thread held
+// the device I/O lock: Mixoto hung when a device was added or removed.
 final class BusSet: @unchecked Sendable {
     private let lock = NSLock()
     private var buses: [OutputBus] = []
     private var meters: [UUID: (peak: Float, time: TimeInterval)] = [:]
     // Meter ballistics: instant rise, then a fall of this many dB per second.
     static let releaseDBPerSecond: Float = 30
-    func set(_ value: [OutputBus]) { lock.lock(); buses = value; lock.unlock() }
+    // The old buses are released after unlock, on the caller's thread.
+    func set(_ value: [OutputBus]) {
+        lock.lock(); let old = buses; buses = value; lock.unlock()
+        withExtendedLifetime(old) {}
+    }
     func feed(_ buffer: AVAudioPCMBuffer, channel: UUID) {
         let peak = Self.peak(buffer), now = ProcessInfo.processInfo.systemUptime
-        lock.lock()
-        let current = buses
+        lock.lock(); defer { lock.unlock() }
         let held = meters[channel].map { Self.decay($0.peak, over: now - $0.time) } ?? 0
         meters[channel] = (max(held, peak), now)
-        lock.unlock()
-        current.forEach { $0.feed(buffer, channel: channel) }
+        for bus in buses { bus.feed(buffer, channel: channel) }
     }
     // Current meter level of a channel's input, before gain. Safe from any thread.
     func level(_ channel: UUID, at now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Float {
@@ -238,8 +249,11 @@ final class AudioRouter {
     func apply(settings: Settings, devices: [Device], defaultOutputID: AudioDeviceID? = nil, failure: @escaping (String) -> Void) async -> [String] {
         var problems: [String] = []
         let monitorDevice = settings.monitorDevice(in: devices, defaultOutputID: defaultOutputID)
+        log.info("Apply start: monitor=\(monitorDevice?.name ?? "none", privacy: .public) defaultOutput=\(defaultOutputID ?? 0) devices=\(devices.count)")
         if monitor.map({ !$0.isHealthy || $0.device?.uid != monitorDevice?.uid || $0.device?.id != monitorDevice?.id }) == true { monitor?.stop(); monitor = nil }
         if stream.map({ !$0.isHealthy }) == true { stream?.stop(); stream = nil }
+        if monitor == nil { log.info("Monitor bus rebuild") }
+        if stream == nil { log.info("Stream bus rebuild") }
         if monitor == nil, !settings.monitorUID.isEmpty {
             if let device = monitorDevice {
                 do { monitor = try OutputBus(device: device, channels: [], monitor: true) } catch { problems.append("Monitor: \(error.localizedDescription)") }
@@ -288,9 +302,11 @@ final class AudioRouter {
         monitor?.sync(settings.channels.filter { active[$0.id] != nil })
         stream?.sync(settings.channels.filter { active[$0.id] != nil })
         for (id, entry) in captures where active[id] != entry.source || !entry.capture.isHealthy {
+            log.info("Capture stop: \(entry.source, privacy: .public)")
             entry.capture.stop(); captures[id] = nil
         }
         for (id, source) in active where captures[id] == nil {
+            log.info("Capture start: \(source, privacy: .public)")
             let buses = buses
             let receive: (AVAudioPCMBuffer) -> Void = { buses.feed($0, channel: id) }
             do {
@@ -324,6 +340,7 @@ final class AudioRouter {
             guard case .mic(let microphone)? = captures[channel.id]?.capture else { continue }
             do { try microphone.update(channel) } catch { problems.append("\(channel.name): \(error.localizedDescription)") }
         }
+        log.info("Apply done: \(problems.count) problems \(problems.joined(separator: " | "), privacy: .public)")
         return problems
     }
     func stop() {
