@@ -76,3 +76,5 @@
 - User correction, 2026-09-30: Do not use the long dash (—) in UI text; use a
   plain hyphen with spaces (" - "). For unavailable saved sources, show the
   saved name, for example "App: Helium - not available", not a generic label.
+
+- User regression, 2026-11-02: Nonblocking output locks silently dropped live audio blocks after removing bus serialization. Preserve lossless serialized delivery; remove control-side Core Audio calls from shared lock scopes. Unit tests do not establish live audio quality.
