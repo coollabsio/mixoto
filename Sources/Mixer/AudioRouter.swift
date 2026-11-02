@@ -21,13 +21,13 @@ final class OutputBus {
     var receivedBlocks: Int { lock.lock(); defer { lock.unlock() }; return received }
     // Audio of a channel waiting in its player, plus the output device delay.
     func latency(_ channel: UUID) -> Double? {
-        lock.lock(); defer { lock.unlock() }
-        guard let budget = budgets[channel] else { return nil }
+        lock.lock(); let budget = budgets[channel]; lock.unlock()
+        guard let budget else { return nil }
         return budget.queued + (device.map { Devices.latency($0.id, input: false) } ?? 0)
     }
     var isHealthy: Bool {
-        lock.lock(); defer { lock.unlock() }
-        guard active, engine.isRunning else { return false }
+        lock.lock(); let wasActive = active; lock.unlock()
+        guard wasActive, engine.isRunning else { return false }
         guard let device else { return true }
         guard let unit = engine.outputNode.audioUnit else { return false }
         var actual: AudioDeviceID = 0
