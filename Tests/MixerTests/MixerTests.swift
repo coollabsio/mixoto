@@ -253,6 +253,36 @@ final class MixerTests: XCTestCase {
         XCTAssertEqual(buses.level(id, at: now + 1), 0.9 * pow(10, -1.5), accuracy: 0.001)
         XCTAssertEqual(buses.level(UUID()), 0)
     }
+    // A player that never plays its queue drops every new block; the bus then
+    // reports the channel stuck, so the router rebuilds it.
+    func testBusReportsChannelThatDropsAllAudio() throws {
+        let channel = Channel(source: "app:test")
+        let bus = try OutputBus(device: nil, channels: [channel], monitor: true)
+        for _ in 0..<3 { bus.feed(constantBuffer(0.5), channel: channel.id) }
+        let now = ProcessInfo.processInfo.systemUptime
+        XCTAssertNil(bus.stuckChannel(at: now))
+        XCTAssertEqual(bus.stuckChannel(at: now + OutputBus.stuckLimit + 1), channel.id)
+        for _ in 0..<2 { _ = try bus.renderOffline(frames: 4096) }
+        bus.feed(constantBuffer(0.5), channel: channel.id)
+        XCTAssertNil(bus.stuckChannel(at: now + OutputBus.stuckLimit + 1))
+    }
+    func testBusSetRecordsInputAndSoundTimes() {
+        let buses = BusSet(), id = UUID()
+        buses.feed(constantBuffer(0.5, frames: 64), channel: id)
+        let sound = buses.activity(id).sound
+        buses.feed(constantBuffer(0, frames: 64), channel: id)
+        XCTAssertGreaterThan(buses.activity(id).input, 0)
+        XCTAssertEqual(buses.activity(id).sound, sound)
+        XCTAssertEqual(buses.activity(UUID()).input, 0)
+    }
+    func testAudioClientLogFindsProcessIDsAcrossChunks() {
+        var found: [pid_t?] = []
+        let watcher = AudioClientLog { found.append($0) }
+        watcher.read("2026-11-05 12:03:36.042 Df coreaudiod[717:1] (CoreAudio) SystemStatusWrapper.mm:89 SystemStatusWrapper::PublishRecordingClientInfo: Report cli")
+        watcher.read("ent 4797 running: yes device: <private>\nTimestamp\n")
+        watcher.read("2026-11-05 11:51:11.689 Df coreaudiod[717:2] ioc (22434) - handle buffer frame size change, old 1024 new 256\n")
+        XCTAssertEqual(found, [4797, nil])
+    }
     func testHelperProcessesBelongToApp() {
         XCTAssertTrue(Devices.belongs("net.imput.helium", to: "net.imput.helium"))
         XCTAssertTrue(Devices.belongs("net.imput.helium.helper", to: "net.imput.helium"))

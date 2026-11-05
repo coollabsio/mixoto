@@ -78,3 +78,17 @@
   saved name, for example "App: Helium - not available", not a generic label.
 
 - User regression, 2026-11-02: Nonblocking output locks silently dropped live audio blocks after removing bus serialization. Preserve lossless serialized delivery; remove control-side Core Audio calls from shared lock scopes. Unit tests do not establish live audio quality.
+
+- 2026-11-03: In zsh, `log` is a shell builtin. Use `/usr/bin/log show` to
+  read unified logs; the builtin prints nothing and looks like "no logs".
+  Logger `info` lines are not kept on disk; use `notice` or `error` for
+  diagnostics that must survive until the user reports a problem.
+- 2026-11-03: "App plays output" (kAudioProcessPropertyIsRunningOutput) does
+  not mean the app makes sound. Klack keeps output open and silent between
+  key presses. Do not repair captures on that signal; log it only.
+
+- 2026-11-05: Rebuilding a process tap while the tapped app starts or stops
+  its output hung coreaudiod (AudioDeviceDestroyIOProcID never returned; only
+  `sudo killall coreaudiod` recovers). Never rebuild taps on raw Core Audio
+  change events; wait until the app's audio is stable. Test tap-rebuild
+  changes for hangs (sample the process) before handing a build to the user.

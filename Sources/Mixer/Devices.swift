@@ -112,6 +112,10 @@ enum Devices {
         var result = empty, size = UInt32(MemoryLayout<T>.size)
         return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &result) == noErr ? result : empty
     }
+    // True while a Core Audio process object plays output.
+    static func isRunningOutput(_ process: AudioObjectID) -> Bool {
+        value(process, kAudioProcessPropertyIsRunningOutput, kAudioObjectPropertyScopeGlobal, UInt32(0)) != 0
+    }
     // Duration of one I/O buffer in seconds; 0 when the device does not report it.
     static func bufferDuration(_ id: AudioDeviceID) -> Double {
         let rate = value(id, kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal, Float64(0))

@@ -21,6 +21,7 @@ final class MixerStore: ObservableObject {
     // Hardware settings of each Elgato Wave:3 that a channel uses, by device UID.
     @Published var wave3: [String: Wave3.State] = [:]
     private let router = AudioRouter()
+    private var clientLog: AudioClientLog?
     private var observer: NSObjectProtocol?
     private var timer: Timer?
     private var wave3Timer: Timer?
@@ -40,6 +41,19 @@ final class MixerStore: ObservableObject {
         settings.ensureSystemChannel()
         observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in await self?.repairIfNeeded() }
+        }
+        router.onAudioChange = { [weak self] in
+            Task { @MainActor in await self?.repairSoon() }
+        }
+        // Temporary: see AudioClientLog.
+        clientLog = AudioClientLog { [weak self] pid in
+            MainActor.assumeIsolated {
+                guard let self, self.router.audioClientChanged(pid) else { return }
+                Task { await self.repairSoon() }
+            }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.clientLog?.stop() }
         }
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -103,10 +117,10 @@ final class MixerStore: ObservableObject {
         }
     }
     func refreshDevices() {
-        log.info("Devices changed: refresh start")
+        log.notice("Devices changed: refresh start")
         defaultOutputID = try? Devices.defaultOutputID()
         do { devices = try Devices.list() } catch { message = error.localizedDescription }
-        log.info("Devices refreshed: \(self.devices.map(\.name).joined(separator: ", "), privacy: .public)")
+        log.notice("Devices refreshed: \(self.devices.map(\.name).joined(separator: ", "), privacy: .public)")
         enforcePreferredInput()
         if running { Task { await apply() } }
     }
@@ -115,7 +129,7 @@ final class MixerStore: ObservableObject {
               let preferred = settings.preferredInput(in: devices) else { inputMessage = ""; return }
         do {
             if try Devices.defaultInputID() != preferred.id {
-                log.info("Default input reset to \(preferred.name, privacy: .public)")
+                log.notice("Default input reset to \(preferred.name, privacy: .public)")
                 try Devices.setDefaultInput(preferred)
             }
             inputMessage = ""
@@ -132,10 +146,12 @@ final class MixerStore: ObservableObject {
     func start() async {
         guard !running, !busy else { return }
         running = true
+        clientLog?.start()
         await apply()
     }
     func stop() async {
         running = false
+        clientLog?.stop()
         router.stop()
         droppedBlocks = 0
         receivedBlocks = 0
@@ -150,15 +166,22 @@ final class MixerStore: ObservableObject {
         repeat {
             pending = false
             let problems = await router.apply(settings: settings, devices: devices, defaultOutputID: defaultOutputID) { [weak self] error in
+                log.error("Capture failed: \(error, privacy: .public)")
                 Task { @MainActor in self?.message = "Capture stopped: \(error)" }
             }
             guard running else { router.stop(); return }
             message = problems.first ?? ""
         } while pending
     }
+    // Checks again just after an app's audio change: a silent tap is rebuilt
+    // after about one second (settleTime) instead of at the next timer tick.
+    private func repairSoon() async {
+        try? await Task.sleep(for: .milliseconds(1100))
+        await repairIfNeeded()
+    }
     private func repairIfNeeded() async {
-        guard running, !applying, !router.isHealthy else { return }
-        log.info("Router unhealthy: repair")
+        guard running, !applying, let problem = router.check() else { return }
+        log.notice("Repair: \(problem, privacy: .public)")
         if let list = try? Devices.list() { devices = list }
         defaultOutputID = try? Devices.defaultOutputID()
         await apply()

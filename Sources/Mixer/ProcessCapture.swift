@@ -78,12 +78,25 @@ final class ProcessCapture: @unchecked Sendable {
     private let setupQueue = DispatchQueue(label: "Mixoto.process-tap-setup")
     private var started = false
     private var pids: [pid_t] = []
+    private var processes: [AudioObjectID] = []
+    // Audio changes of the tapped processes, such as a short input start. The
+    // tap can stay silent after one (seen with Helium); the router checks it.
+    private var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
+    // Own lock and queue: stop() removes listeners while it holds lifecycleLock.
+    private let changeLock = NSLock()
+    private let listenerQueue = DispatchQueue(label: "Mixoto.process-tap-listener")
+    private var changeTime: TimeInterval = 0
+    private var observedSince: TimeInterval = 0
+    // Changes that Mixoto's own captures cause: device start and stop, and the
+    // process mute state ('pomt') that each tap sets with mutedWhenTapped.
+    static let ignoredProperties: Set<AudioObjectPropertySelector> = [kAudioDevicePropertyDeviceIsRunning, kAudioDevicePropertyDeviceIsRunningSomewhere, 0x706F_6D74]
     private var selectedFormat: AudioStreamBasicDescription?
     private var reportedFailure = false
     private let receive: (AVAudioPCMBuffer) -> Void
     private let failure: (String) -> Void
-    init(receive: @escaping (AVAudioPCMBuffer) -> Void, failure: @escaping (String) -> Void) {
-        self.receive = receive; self.failure = failure
+    private let changed: () -> Void
+    init(receive: @escaping (AVAudioPCMBuffer) -> Void, failure: @escaping (String) -> Void, changed: @escaping () -> Void = {}) {
+        self.receive = receive; self.failure = failure; self.changed = changed
     }
     var latency: Double {
         lifecycleLock.lock(); defer { lifecycleLock.unlock() }
@@ -107,12 +120,56 @@ final class ProcessCapture: @unchecked Sendable {
         var value: UInt32 = 0; size = UInt32(MemoryLayout.size(ofValue: value))
         return AudioObjectGetPropertyData(aggregateID, &address, 0, nil, &size, &value) == noErr && value != 0
     }
+    // True while a tapped process plays output. Always false for the System tap.
+    var isPlaying: Bool {
+        lifecycleLock.lock(); let objects = processes; lifecycleLock.unlock()
+        return objects.contains(where: Devices.isRunningOutput)
+    }
+    // Time of the last audio change of a tapped process; 0 when none.
+    var lastChange: TimeInterval { changeLock.lock(); defer { changeLock.unlock() }; return changeTime }
+    // Records an app audio change found elsewhere (AudioClientLog).
+    func noteChange() { changeLock.lock(); changeTime = ProcessInfo.processInfo.systemUptime; changeLock.unlock() }
+    // True when the tap includes this process. nil (no process ID) matches every app tap.
+    func includes(_ pid: pid_t?) -> Bool {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        return !pids.isEmpty && (pid == nil || pids.contains(pid!))
+    }
+    // Listens to every property of the tapped processes, the tap, and its
+    // private device. Helium opened an input for 13 ms without a change of a
+    // process "running" property, so no single property is enough.
+    private func observe(_ objects: [AudioObjectID]) {
+        changeLock.lock(); observedSince = ProcessInfo.processInfo.systemUptime; changeLock.unlock()
+        let named = objects.map { ($0, "process \($0)") } + [(tapID, "tap"), (aggregateID, "capture device")]
+        for (object, name) in named where object != 0 {
+            var address = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertySelectorWildcard, mScope: kAudioObjectPropertyScopeWildcard, mElement: kAudioObjectPropertyElementWildcard)
+            let block: AudioObjectPropertyListenerBlock = { [weak self] count, addresses in
+                guard let self else { return }
+                let selectors = UnsafeBufferPointer(start: addresses, count: Int(count)).map(\.mSelector).filter { !Self.ignoredProperties.contains($0) }
+                guard !selectors.isEmpty else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                self.changeLock.lock()
+                // Properties settle while the capture starts; that is not an app change.
+                let settling = now - self.observedSince < 2
+                if !settling { self.changeTime = now }
+                self.changeLock.unlock()
+                guard !settling else { return }
+                log.notice("Audio change: \(name, privacy: .public) \(selectors.map(Self.fourCC).joined(separator: ","), privacy: .public)")
+                self.changed()
+            }
+            if AudioObjectAddPropertyListenerBlock(object, &address, listenerQueue, block) == noErr { listeners.append((object, address, block)) }
+        }
+    }
+    static func fourCC(_ value: UInt32) -> String {
+        let bytes = [24, 16, 8, 0].map { UInt8((value >> $0) & 0xFF) }
+        return bytes.allSatisfy { $0 >= 32 && $0 < 127 } ? String(decoding: bytes, as: UTF8.self) : String(value)
+    }
     // Captures a mixdown of the given process objects (an app and its helpers).
     func start(processes: [AudioObjectID], pids: [pid_t]) async throws {
         try await onSetupQueue {
             self.lifecycleLock.lock(); defer { self.lifecycleLock.unlock() }
-            self.pids = pids
+            self.pids = pids; self.processes = processes
             try self.startTap(CATapDescription(stereoMixdownOfProcesses: processes))
+            self.observe(processes)
         }
     }
     // Captures every process except the given process objects.
@@ -144,6 +201,7 @@ final class ProcessCapture: @unchecked Sendable {
             selectedFormat = asbd
             guard let format = AVAudioFormat(streamDescription: &asbd) else { throw MixerError.message("The application audio format is not available.") }
             let normalizer = try PCMNormalizer(format: format)
+            log.notice("Tap format: \(asbd.mSampleRate) Hz, \(asbd.mChannelsPerFrame) ch, interleaved=\(format.isInterleaved)")
             let composition: [String: Any] = [
                 kAudioAggregateDeviceNameKey: "Mixoto private capture",
                 kAudioAggregateDeviceUIDKey: UUID().uuidString,
@@ -168,7 +226,13 @@ final class ProcessCapture: @unchecked Sendable {
             AudioDeviceDestroyIOProcID(aggregateID, ioProc)
         }
         self.ioProc = nil; started = false
-        pids.removeAll()
+        pids.removeAll(); processes.removeAll()
+        for (object, address, block) in listeners {
+            var address = address
+            AudioObjectRemovePropertyListenerBlock(object, &address, listenerQueue, block)
+        }
+        listeners.removeAll()
+        changeLock.lock(); changeTime = 0; changeLock.unlock()
         selectedFormat = nil
         queue.sync {}
         if aggregateID != 0 { AudioHardwareDestroyAggregateDevice(aggregateID); aggregateID = 0 }
