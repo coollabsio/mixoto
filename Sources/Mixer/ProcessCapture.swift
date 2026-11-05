@@ -127,8 +127,13 @@ final class ProcessCapture: @unchecked Sendable {
     }
     // Time of the last audio change of a tapped process; 0 when none.
     var lastChange: TimeInterval { changeLock.lock(); defer { changeLock.unlock() }; return changeTime }
-    // Records an app audio change found elsewhere (AudioClientLog).
-    func noteChange() { changeLock.lock(); changeTime = ProcessInfo.processInfo.systemUptime; changeLock.unlock() }
+    // Records an app audio reconfiguration found in the coreaudiod log
+    // (AudioClientLog). After one, the tap can deliver silence or garbled
+    // audio, so the router rebuilds it even when it has sound.
+    private(set) var reconfigured = false
+    func noteReconfiguration() {
+        changeLock.lock(); changeTime = ProcessInfo.processInfo.systemUptime; reconfigured = true; changeLock.unlock()
+    }
     // True when the tap includes this process. nil (no process ID) matches every app tap.
     func includes(_ pid: pid_t?) -> Bool {
         lifecycleLock.lock(); defer { lifecycleLock.unlock() }

@@ -302,7 +302,7 @@ final class AudioRouter {
         var matched = false
         for (id, entry) in captures {
             guard case .app(let capture) = entry.capture, capture.includes(pid) else { continue }
-            capture.noteChange(); matched = true
+            capture.noteReconfiguration(); matched = true
             log.notice("Audio client change (coreaudiod log, pid \(pid.map(String.init) ?? "-", privacy: .public)): channel \(id.uuidString.prefix(8), privacy: .public)")
         }
         return matched
@@ -325,6 +325,9 @@ final class AudioRouter {
     private func captureProblem(_ id: UUID, now: TimeInterval) -> String? {
         guard let entry = captures[id] else { return nil }
         guard entry.capture.isHealthy else { return "capture unhealthy" }
+        if case .app(let capture) = entry.capture, capture.reconfigured, now - capture.lastChange >= Self.settleTime {
+            return "app reconfigured its audio"
+        }
         if restart.contains(id) { return "tap silent after an app audio change" }
         let idle = now - max(buses.activity(id).input, entry.started)
         return idle > Self.stallLimit ? "no input for \(Int(idle)) s" : nil
