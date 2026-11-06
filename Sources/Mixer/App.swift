@@ -9,6 +9,8 @@ final class MixerStore: ObservableObject {
     @Published var defaultOutputID: AudioDeviceID?
     @Published var apps: [RunningApp] = []
     @Published var running = false
+    // True while the user holds "Hear Stream": Monitor plays the Stream Mix.
+    @Published var previewingStream = false
     @Published var busy = false
     @Published var message = ""
     @Published var inputMessage = ""
@@ -151,6 +153,7 @@ final class MixerStore: ObservableObject {
     }
     func stop() async {
         running = false
+        previewingStream = false
         clientLog?.stop()
         router.stop()
         droppedBlocks = 0
@@ -191,6 +194,11 @@ final class MixerStore: ObservableObject {
         if running { Task { await apply() } }
     }
     func level(_ channel: UUID) -> Float { router.level(channel) }
+    func previewStream(_ on: Bool) {
+        guard on != previewingStream else { return }
+        previewingStream = on
+        router.previewStream(on, channels: settings.channels)
+    }
     func renameStreamMix(_ name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let device = devices.first(where: \.isStreamMix), !name.isEmpty, name != device.name else { return }
@@ -305,6 +313,16 @@ struct MixerView: View {
                             Text("Saved device - not available").tag(store.settings.monitorUID)
                         }
                     }.labelsHidden().flexibleButtonWidth().frame(width: 280)
+                    // Hold, not a toggle: releasing always returns to the Monitor mix.
+                    Label("Hear Stream", systemImage: "ear")
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .glass(tint: store.previewingStream ? .accentColor : nil, interactive: true, in: Capsule())
+                        .contentShape(Capsule())
+                        .onLongPressGesture(minimumDuration: .infinity, pressing: { store.previewStream($0) }, perform: {})
+                        .disabled(!store.running || store.settings.monitorUID.isEmpty)
+                        .opacity(!store.running || store.settings.monitorUID.isEmpty ? 0.4 : 1)
+                        .help("Hold to hear the Stream Mix on your Monitor output")
+                        .accessibilityAddTraits(.isButton)
                     Spacer()
                     // Running state and Start/Stop control in one: green runs, red is stopped.
                     Button { Task { if store.running { await store.stop() } else { await store.start() } } } label: {

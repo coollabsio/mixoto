@@ -338,7 +338,7 @@ final class MixerTests: XCTestCase {
         XCTAssertEqual(rms(try monitor.renderOffline(frames: 4096)), 0.1, accuracy: 0.002)
         XCTAssertEqual(rms(try stream.renderOffline(frames: 4096)), 0.3, accuracy: 0.002)
         channel.monitorMuted = true
-        monitor.update(channel, monitor: true)
+        monitor.sync([channel])
         monitor.feed(buffer, channel: channel.id); stream.feed(buffer, channel: channel.id)
         XCTAssertEqual(rms(try monitor.renderOffline(frames: 4096)), 0, accuracy: 0.002)
         XCTAssertEqual(rms(try stream.renderOffline(frames: 4096)), 0.3, accuracy: 0.002)
@@ -351,6 +351,17 @@ final class MixerTests: XCTestCase {
         nextMonitor.feed(buffer, channel: channel.id); nextStream.feed(buffer, channel: channel.id)
         XCTAssertEqual(rms(try nextMonitor.renderOffline(frames: 4096)), 0.1, accuracy: 0.002)
         XCTAssertEqual(rms(try nextStream.renderOffline(frames: 4096)), 0, accuracy: 0.002)
+    }
+    func testMonitorPlaysStreamGainsWhilePreviewing() throws {
+        let channel = Channel(source: "app:test", monitor: 0.25, stream: 0.75)
+        let monitor = try OutputBus(device: nil, channels: [channel], monitor: true)
+        defer { monitor.stop() }
+        monitor.setPreviewStream(true, channels: [channel])
+        monitor.feed(constantBuffer(0.4), channel: channel.id)
+        XCTAssertEqual(rms(try monitor.renderOffline(frames: 4096)), 0.3, accuracy: 0.002)
+        monitor.setPreviewStream(false, channels: [channel])
+        monitor.feed(constantBuffer(0.4), channel: channel.id)
+        XCTAssertEqual(rms(try monitor.renderOffline(frames: 4096)), 0.1, accuracy: 0.002)
     }
     func testActualGraphSumsChannels() throws {
         let a = Channel(source: "app:a", monitor: 0.2)

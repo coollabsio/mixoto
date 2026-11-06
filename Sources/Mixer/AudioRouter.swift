@@ -20,6 +20,8 @@ final class OutputBus {
     private var received = 0
     let device: Device?
     private let monitor: Bool
+    // A Monitor bus plays the Stream gains while the user previews the Stream Mix.
+    private var previewStream = false
     private let outputBuffer: Double
     static let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
     var droppedBlocks: Int { lock.lock(); defer { lock.unlock() }; return dropped }
@@ -88,13 +90,15 @@ final class OutputBus {
                 budgets[id] = QueueBudget()
                 if engine.isRunning, !engine.isInManualRenderingMode { player.play() }
             }
-            players[id]?.volume = monitor ? channel.monitorGain : channel.streamGain
+            players[id]?.volume = gain(channel)
         }
     }
-    func update(_ channel: Channel, monitor: Bool) {
+    func setPreviewStream(_ on: Bool, channels: [Channel]) {
         lock.lock(); defer { lock.unlock() }
-        players[channel.id]?.volume = monitor ? channel.monitorGain : channel.streamGain
+        previewStream = on
+        for channel in channels { players[channel.id]?.volume = gain(channel) }
     }
+    private func gain(_ channel: Channel) -> Float { monitor && !previewStream ? channel.monitorGain : channel.streamGain }
     func renderOffline(frames: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
         guard engine.isInManualRenderingMode,
               let buffer = AVAudioPCMBuffer(pcmFormat: Self.format, frameCapacity: frames) else {
@@ -270,6 +274,12 @@ final class AudioRouter {
     }
     private var monitor: OutputBus?
     private var stream: OutputBus?
+    // Monitor plays the Stream Mix while true.
+    private var previewStream = false
+    func previewStream(_ on: Bool, channels: [Channel]) {
+        previewStream = on
+        monitor?.setPreviewStream(on, channels: channels)
+    }
     private let buses = BusSet()
     private var captures: [UUID: (source: String, capture: Capture, started: TimeInterval)] = [:]
     // Channels whose app plays output while the tap delivers only silence;
@@ -445,6 +455,7 @@ final class AudioRouter {
             } else { wanted[id] = nil; problems.append("System: waiting for Mixoto audio output.") }
         }
         let active = monitor != nil || stream != nil ? wanted : [:]
+        monitor?.setPreviewStream(previewStream, channels: [])
         monitor?.sync(settings.channels.filter { active[$0.id] != nil })
         stream?.sync(settings.channels.filter { active[$0.id] != nil })
         let now = ProcessInfo.processInfo.systemUptime
@@ -496,6 +507,7 @@ final class AudioRouter {
     }
     func stop() {
         captures.values.forEach { $0.capture.stop() }
+        previewStream = false
         captures.removeAll(); silent.removeAll(); restart.removeAll(); wasPlaying.removeAll(); playStarts.removeAll(); seenChanges.removeAll(); stats.removeAll()
         buses.set([])
         monitor?.stop(); stream?.stop()
