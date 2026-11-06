@@ -417,7 +417,7 @@ struct MixerView: View {
         let installed = bundle.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
             .map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") }
         let name = !channel.sourceName.isEmpty ? channel.sourceName : installed ?? channel.name
-        return "\(bundle == nil ? "Mic" : "App"): \(name) - not available"
+        return "\(bundle == nil ? "Input" : "App"): \(name) - not available"
     }
     private func sourceName(_ source: String) -> String? {
         if source.hasPrefix("app:") { return store.apps.first { "app:\($0.bundleIdentifier)" == source }?.name }
@@ -444,7 +444,7 @@ struct MixerView: View {
                     channel.wrappedValue.sourceName = sourceName(source) ?? ""
                 })) {
                     Text("Unassigned").tag("")
-                    ForEach(store.devices.filter { $0.inputs > 0 && !$0.isLoopback }) { Text("Mic: \($0.name)").tag("mic:\($0.uid)") }
+                    ForEach(store.devices.filter { $0.inputs > 0 && !$0.isLoopback }) { Text("Input: \($0.name)").tag("mic:\($0.uid)") }
                     ForEach(store.apps, id: \.bundleIdentifier) { Text("App: \($0.name)").tag("app:\($0.bundleIdentifier)") }
                     if !value.source.isEmpty && !availableSources.contains(value.source) { Text(Self.unavailableLabel(value)).tag(value.source) }
                 }.labelsHidden().flexibleButtonWidth()
@@ -553,7 +553,7 @@ struct MicrophoneEffects: View {
     var body: some View {
         Button { showing.toggle() } label: { Image(systemName: "slider.horizontal.3") }
             .glassButton(prominent: channel.lowCut > 0 || channel.voiceFocus)
-            .help("Microphone effects").accessibilityLabel("Microphone effects")
+            .help("Input effects").accessibilityLabel("Input effects")
             .popover(isPresented: $showing, arrowEdge: .bottom) {
                 Form {
                     if isWave3 {

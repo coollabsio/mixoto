@@ -190,9 +190,9 @@ final class MixerTests: XCTestCase {
     }
     func testUnavailableSourceShowsItsSavedName() {
         var mic = Channel(name: "Voice", source: "mic:gone")
-        XCTAssertEqual(MixerView.unavailableLabel(mic), "Mic: Voice - not available")
+        XCTAssertEqual(MixerView.unavailableLabel(mic), "Input: Voice - not available")
         mic.sourceName = "Elgato Wave:3"
-        XCTAssertEqual(MixerView.unavailableLabel(mic), "Mic: Elgato Wave:3 - not available")
+        XCTAssertEqual(MixerView.unavailableLabel(mic), "Input: Elgato Wave:3 - not available")
         XCTAssertEqual(try JSONDecoder().decode(Channel.self, from: JSONEncoder().encode(mic)).sourceName, "Elgato Wave:3")
         // An installed app that is not running: its name comes from the bundle ID.
         let finder = Channel(name: "Files", source: "app:com.apple.finder")
@@ -226,10 +226,10 @@ final class MixerTests: XCTestCase {
     func testActiveSourcesSkipInvalidChannels() {
         let app = Channel(source: "app:test")
         let duplicate = Channel(source: "app:test")
-        let micA = Channel(source: "mic:a"), micB = Channel(source: "mic:b")
+        let micA = Channel(source: "mic:a"), micB = Channel(source: "mic:b"), micDuplicate = Channel(source: "mic:a")
         let bad = Channel(source: "other:x"), empty = Channel(source: "app:"), unassigned = Channel()
-        let (sources, problems) = Settings(channels: [app, duplicate, micA, micB, bad, empty, unassigned]).activeSources()
-        XCTAssertEqual(sources, [app.id: "app:test", micA.id: "mic:a"])
+        let (sources, problems) = Settings(channels: [app, duplicate, micA, micB, micDuplicate, bad, empty, unassigned]).activeSources()
+        XCTAssertEqual(sources, [app.id: "app:test", micA.id: "mic:a", micB.id: "mic:b"])
         XCTAssertEqual(problems.count, 4)
     }
     func testSystemChannelIsPermanentAndActive() {

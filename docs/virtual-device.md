@@ -39,7 +39,7 @@ rtk proxy sudo /bin/sh scripts/install-driver.sh "$PWD/artifacts/MixotoAudio.dri
 
 ## Create the combined mix
 
-1. Add source channels and assign the applications or one microphone.
+1. Add source channels and assign the applications or microphones.
 2. Set Stream gains low. Unmute only the channels to include in the mix. A
    Stream-muted channel contributes silence. There is no extra source channel
    to add: the virtual device is the output of the combined Stream graph.

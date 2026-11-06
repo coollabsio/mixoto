@@ -97,8 +97,6 @@ struct Settings: Codable {
                 problems.append("\(channel.name): the source is not supported.")
             } else if used.contains(source) {
                 problems.append("\(channel.name): this source is already used by another channel.")
-            } else if source.hasPrefix("mic:"), used.contains(where: { $0.hasPrefix("mic:") }) {
-                problems.append("\(channel.name): use only one microphone channel.")
             } else {
                 used.insert(source); sources[channel.id] = source
             }
