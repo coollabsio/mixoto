@@ -464,7 +464,7 @@ struct MixerView: View {
                             Image(systemName: "mic.slash.fill").foregroundStyle(.red)
                                 .help("Muted on the Wave:3").accessibilityLabel("Muted on the Wave:3")
                         }
-                        MicrophoneEffects(channel: channel, device: device, wave3: wave3)
+                        if device?.isDigitalInput != true { MicrophoneEffects(channel: channel, device: device, wave3: wave3) }
                     }
                     Button(role: .destructive) { store.settings.channels.removeAll { $0.id == value.id }; store.save() } label: { Image(systemName: "trash") }
                         .glassButton().help("Remove channel")

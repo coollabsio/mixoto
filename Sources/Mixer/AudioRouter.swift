@@ -191,7 +191,7 @@ final class MicrophoneCapture {
     // Wave:3 only when it changes or the microphone starts again.
     func update(_ channel: Channel) throws {
         for band in lowCut.bands { band.frequency = Float(max(20, channel.lowCut)) }
-        lowCut.bypass = channel.lowCut <= 0
+        lowCut.bypass = channel.lowCut <= 0 || selectedDevice?.isDigitalInput == true
         voiceFocus?.auAudioUnit.parameterTree?.parameter(withAddress: AUParameterAddress(kAUSoundIsolationParam_WetDryMixPercent))?.value = Channel.voiceFocusMix(channel.voiceFocusStrength)
         if let wanted = channel.clipguard, wanted != clipguard, let device = selectedDevice, Wave3.serial(device) != nil {
             try Wave3.setClipguard(wanted, device: device)
@@ -430,8 +430,10 @@ final class AudioRouter {
             } else { wanted[id] = source + "|" + objects.map(String.init).joined(separator: ",") }
         }
         // The key changes with Voice Focus, so turning it on or off rebuilds the capture.
+        // Digital inputs (capture cards) carry no voice to isolate.
         for channel in settings.channels where channel.voiceFocus && MicrophoneCapture.voiceFocusAvailable {
-            if let source = wanted[channel.id], source.hasPrefix("mic:") { wanted[channel.id] = source + "|voice-focus" }
+            if let source = wanted[channel.id], source.hasPrefix("mic:"),
+               devices.first(where: { "mic:\($0.uid)" == source })?.isDigitalInput != true { wanted[channel.id] = source + "|voice-focus" }
         }
         if let id = wanted.first(where: { $0.value == Channel.system })?.key {
             let excluded = processes.filter { process in

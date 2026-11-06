@@ -9,6 +9,9 @@ struct Device: Identifiable, Hashable {
     let name: String
     let inputs: Int
     let outputs: Int
+    // Audio from a digital connection such as HDMI (capture cards), not a
+    // microphone. Microphone effects do not apply to it.
+    var isDigitalInput = false
     var isStreamMix: Bool { uid == Self.streamMixUID }
     var isLoopback: Bool { isStreamMix || uid == "local.openmixer.stream-mix" || name.lowercased().contains("blackhole") }
 }
@@ -22,7 +25,8 @@ enum Devices {
         try ids.withUnsafeMutableBytes { try check(AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, $0.baseAddress!)) }
         return ids.compactMap { id in
             guard let uid = string(id, kAudioDevicePropertyDeviceUID), let name = string(id, kAudioObjectPropertyName) else { return nil }
-            return Device(id: id, uid: uid, name: name, inputs: channels(id, kAudioDevicePropertyScopeInput), outputs: channels(id, kAudioDevicePropertyScopeOutput))
+            return Device(id: id, uid: uid, name: name, inputs: channels(id, kAudioDevicePropertyScopeInput), outputs: channels(id, kAudioDevicePropertyScopeOutput),
+                          isDigitalInput: isDigitalInput(id))
         }.sorted { $0.name < $1.name }
     }
     // Default playback output, not the separate system-alert sound output.
@@ -111,6 +115,15 @@ enum Devices {
         var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
         var result = empty, size = UInt32(MemoryLayout<T>.size)
         return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &result) == noErr ? result : empty
+    }
+    // Elgato HD60 X and Cam Link 4K report 'spdf'; microphones report 'micr'
+    // or a USB microphone type (0x201). Line and unknown inputs can carry a
+    // microphone through an audio interface, so they are not digital.
+    private static func isDigitalInput(_ id: AudioDeviceID) -> Bool {
+        let stream = value(id, kAudioDevicePropertyStreams, kAudioObjectPropertyScopeInput, AudioStreamID(0))
+        guard stream != 0 else { return false }
+        let terminal = value(stream, kAudioStreamPropertyTerminalType, kAudioObjectPropertyScopeGlobal, UInt32(0))
+        return [kAudioStreamTerminalTypeDigitalAudioInterface, kAudioStreamTerminalTypeHDMI, kAudioStreamTerminalTypeDisplayPort].contains(terminal)
     }
     // True while a Core Audio process object plays output.
     static func isRunningOutput(_ process: AudioObjectID) -> Bool {
