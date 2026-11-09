@@ -41,9 +41,10 @@ final class OutputBus {
     func drops(_ channel: UUID) -> Int { lock.lock(); defer { lock.unlock() }; return channelDrops[channel] ?? 0 }
     // Player state of a channel, for logs.
     func state(_ channel: UUID) -> String {
-        lock.lock(); defer { lock.unlock() }
-        guard let player = players[channel] else { return "\(name): no player" }
-        return "\(name): queued=\(Int((budgets[channel]?.queued ?? 0) * 1000)) ms playing=\(player.isPlaying) volume=\(player.volume) engine=\(engine.isRunning) dropped=\(dropped)"
+        // Player and engine state outside the lock: engine.isRunning can wait on Core Audio.
+        lock.lock(); let player = players[channel], queued = budgets[channel]?.queued ?? 0, dropped = dropped; lock.unlock()
+        guard let player else { return "\(name): no player" }
+        return "\(name): queued=\(Int(queued * 1000)) ms playing=\(player.isPlaying) volume=\(player.volume) engine=\(engine.isRunning) dropped=\(dropped)"
     }
     var isHealthy: Bool {
         lock.lock(); let wasActive = active; lock.unlock()
@@ -74,29 +75,37 @@ final class OutputBus {
         if !engine.isInManualRenderingMode { players.values.forEach { $0.play() } }
     }
     // Adds, removes, and updates channel players while the engine runs.
+    // Engine and player calls stay outside the lock. player.play() waits on
+    // the engine's I/O unit queue, which can wait on Core Audio for an I/O
+    // cycle; a tap callback in that cycle waits in feed() for this lock.
+    // With play() inside the lock, connecting AirPods hung Mixoto.
     func sync(_ channels: [Channel]) {
-        lock.lock(); defer { lock.unlock() }
         let wanted = Dictionary(channels.filter { !$0.source.isEmpty }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for (id, player) in players where wanted[id] == nil {
-            player.stop(); engine.detach(player)
+        lock.lock()
+        let removed = players.filter { wanted[$0.key] == nil }
+        for id in removed.keys {
             players[id] = nil; budgets[id] = nil; dropStarts[id] = nil; channelDrops[id] = nil
         }
-        for (id, channel) in wanted {
-            if players[id] == nil {
-                let player = AVAudioPlayerNode()
-                engine.attach(player)
-                engine.connect(player, to: engine.mainMixerNode, format: Self.format)
-                players[id] = player
-                budgets[id] = QueueBudget()
-                if engine.isRunning, !engine.isInManualRenderingMode { player.play() }
-            }
-            players[id]?.volume = gain(channel)
+        let existing = players
+        lock.unlock()
+        for player in removed.values { player.stop(); engine.detach(player) }
+        var added: [UUID: AVAudioPlayerNode] = [:]
+        for id in wanted.keys where existing[id] == nil {
+            let player = AVAudioPlayerNode()
+            engine.attach(player)
+            engine.connect(player, to: engine.mainMixerNode, format: Self.format)
+            if engine.isRunning, !engine.isInManualRenderingMode { player.play() }
+            added[id] = player
         }
+        lock.lock()
+        for (id, player) in added { players[id] = player; budgets[id] = QueueBudget() }
+        let current = players
+        lock.unlock()
+        for (id, channel) in wanted { current[id]?.volume = gain(channel) }
     }
     func setPreviewStream(_ on: Bool, channels: [Channel]) {
-        lock.lock(); defer { lock.unlock() }
-        previewStream = on
-        for channel in channels { players[channel.id]?.volume = gain(channel) }
+        lock.lock(); previewStream = on; let current = players; lock.unlock()
+        for channel in channels { current[channel.id]?.volume = gain(channel) }
     }
     private func gain(_ channel: Channel) -> Float { monitor && !previewStream ? channel.monitorGain : channel.streamGain }
     func renderOffline(frames: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
@@ -270,7 +279,7 @@ final class AudioRouter {
         var isPlaying: Bool { if case .app(let c) = self { c.isPlaying } else { false } }
         var lastChange: TimeInterval { if case .app(let c) = self { c.lastChange } else { 0 } }
         var latency: Double { switch self { case .app(let c): c.latency; case .mic(let c): c.latency } }
-        func stop() { switch self { case .app(let c): c.stop(); case .mic(let c): c.stop() } }
+        func stop() async { switch self { case .app(let c): await c.stopInBackground(); case .mic(let c): c.stop() } }
     }
     private var monitor: OutputBus?
     private var stream: OutputBus?
@@ -463,7 +472,8 @@ final class AudioRouter {
             let problem = active[id] == entry.source ? captureProblem(id, now: now) : "source changed"
             guard let problem else { continue }
             log.notice("Capture stop (\(problem, privacy: .public)): \(self.describe(id), privacy: .public)")
-            entry.capture.stop(); captures[id] = nil
+            captures[id] = nil
+            await entry.capture.stop()
             silent.remove(id); restart.remove(id); wasPlaying[id] = nil; playStarts[id] = nil; seenChanges[id] = nil; stats[id] = nil
         }
         for (id, source) in active where captures[id] == nil {
@@ -505,12 +515,13 @@ final class AudioRouter {
         log.notice("Apply done: \(problems.count) problems \(problems.joined(separator: " | "), privacy: .public)")
         return problems
     }
-    func stop() {
-        captures.values.forEach { $0.capture.stop() }
+    func stop() async {
+        let stopping = captures.values.map(\.capture)
         previewStream = false
         captures.removeAll(); silent.removeAll(); restart.removeAll(); wasPlaying.removeAll(); playStarts.removeAll(); seenChanges.removeAll(); stats.removeAll()
         buses.set([])
         monitor?.stop(); stream?.stop()
         monitor = nil; stream = nil
+        for capture in stopping { await capture.stop() }
     }
 }

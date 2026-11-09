@@ -22,6 +22,12 @@ final class AudioClientLog {
 
     func start() {
         guard process == nil else { return }
+        // A watcher from a Mixoto that crashed or was force-quit keeps
+        // running under launchd (parent PID 1). Stop it first.
+        let cleanup = Process()
+        cleanup.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        cleanup.arguments = ["-P", "1", "-f", "PublishRecordingClientInfo: Report client"]
+        if (try? cleanup.run()) != nil { cleanup.waitUntilExit() }
         let process = Process(), pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/log")
         process.arguments = ["stream", "--style", "compact", "--predicate",

@@ -92,3 +92,16 @@
   `sudo killall coreaudiod` recovers). Never rebuild taps on raw Core Audio
   change events; wait until the app's audio is stable. Test tap-rebuild
   changes for hangs (sample the process) before handing a build to the user.
+
+- 2026-11-09: Two main-thread deadlocks hung Mixoto when AirPods connected.
+  (1) OutputBus.sync called player.play() while holding the bus lock;
+  play() waits on the engine's I/O unit queue -> Core Audio -> a tap I/O
+  cycle that waits in feed() for the same lock. (2) The
+  AVAudioEngineConfigurationChange observer used `queue: .main`, which makes
+  the posting engine queue wait for main while main waited for that queue in
+  an engine deinit. Rules: no AVAudioEngine/player/Core Audio call inside a
+  lock that audio callbacks take; observe engine notifications with
+  `queue: nil` and hop to main. Reproduce device-change hangs by switching
+  the default output device in a loop and sampling the process.
+  Run `sh scripts/stress-device-switch.sh 20 <other output ID>` before a
+  release that touches audio threading; it failed on v0.0.10 and passes now.

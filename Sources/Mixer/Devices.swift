@@ -29,6 +29,16 @@ enum Devices {
                           isDigitalInput: isDigitalInput(id))
         }.sorted { $0.name < $1.name }
     }
+    // Device list and default output, read on a background queue. A read can
+    // wait on Core Audio for a long time while devices change (for example
+    // when Bluetooth headphones connect); the main thread must not wait.
+    static func load() async -> (list: Result<[Device], Error>, defaultOutput: AudioDeviceID?) {
+        await withCheckedContinuation { completion in
+            DispatchQueue.global(qos: .userInitiated).async {
+                completion.resume(returning: (Result { try list() }, try? defaultOutputID()))
+            }
+        }
+    }
     // Default playback output, not the separate system-alert sound output.
     static func defaultOutputID() throws -> AudioDeviceID? {
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)

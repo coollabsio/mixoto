@@ -224,6 +224,14 @@ final class ProcessCapture: @unchecked Sendable {
             started = true
         } catch { stop(); throw error }
     }
+    // Stops on the setup queue. AudioDeviceStop and AudioDeviceDestroyIOProcID
+    // wait for coreaudiod; when it stalls they never return (seen on
+    // 2026-11-05). Then only this capture's teardown waits, not the window.
+    func stopInBackground() async {
+        await withCheckedContinuation { completion in
+            setupQueue.async { self.stop(); completion.resume() }
+        }
+    }
     func stop() {
         lifecycleLock.lock(); defer { lifecycleLock.unlock() }
         if let ioProc {

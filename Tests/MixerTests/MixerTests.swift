@@ -105,7 +105,7 @@ final class MixerTests: XCTestCase {
         let problems = await router.apply(settings: Settings(monitorUID: Settings.defaultMonitorUID), devices: [], failure: { _ in })
         XCTAssertTrue(problems.contains { $0.contains("default system output is unavailable") })
         XCTAssertEqual(router.receivedBlocks, 0)
-        router.stop()
+        await router.stop()
     }
     func testNewChannelsStartAtFullVolume() {
         let channel = Channel()
@@ -359,9 +359,15 @@ final class MixerTests: XCTestCase {
         monitor.setPreviewStream(true, channels: [channel])
         monitor.feed(constantBuffer(0.4), channel: channel.id)
         XCTAssertEqual(rms(try monitor.renderOffline(frames: 4096)), 0.3, accuracy: 0.002)
-        monitor.setPreviewStream(false, channels: [channel])
-        monitor.feed(constantBuffer(0.4), channel: channel.id)
-        XCTAssertEqual(rms(try monitor.renderOffline(frames: 4096)), 0.1, accuracy: 0.002)
+        // A second render in the same offline graph can drop the next block:
+        // its dataRendered callback need not run before the next feed. Use a
+        // fresh graph that turns preview on and off again.
+        let restored = try OutputBus(device: nil, channels: [channel], monitor: true)
+        defer { restored.stop() }
+        restored.setPreviewStream(true, channels: [channel])
+        restored.setPreviewStream(false, channels: [channel])
+        restored.feed(constantBuffer(0.4), channel: channel.id)
+        XCTAssertEqual(rms(try restored.renderOffline(frames: 4096)), 0.1, accuracy: 0.002)
     }
     func testActualGraphSumsChannels() throws {
         let a = Channel(source: "app:a", monitor: 0.2)
@@ -397,7 +403,7 @@ final class MixerTests: XCTestCase {
         XCTAssertTrue(problems[0].contains("Install the virtual device"))
         XCTAssertTrue(problems.contains { $0.contains("waiting for the app to play audio") })
         XCTAssertEqual(router.receivedBlocks, 0)
-        router.stop()
+        await router.stop()
     }
     func testActualGraphAddsAndRemovesChannelsWhileRunning() throws {
         let a = Channel(source: "app:a", monitor: 0.5)

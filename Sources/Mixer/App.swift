@@ -23,6 +23,7 @@ final class MixerStore: ObservableObject {
     // Hardware settings of each Elgato Wave:3 that a channel uses, by device UID.
     @Published var wave3: [String: Wave3.State] = [:]
     private let router = AudioRouter()
+    private var deviceGeneration = 0
     private var clientLog: AudioClientLog?
     private var observer: NSObjectProtocol?
     private var timer: Timer?
@@ -41,7 +42,11 @@ final class MixerStore: ObservableObject {
         // Retain saved channels/gains but replace the old OBS/BlackHole route.
         settings.streamUID = Device.streamMixUID
         settings.ensureSystemChannel()
-        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] _ in
+        // queue nil, then hop to main. With queue .main, the posting engine
+        // queue waits until the block has run on main; main can at the same
+        // time wait for that engine queue (an engine deinit), and Mixoto hung
+        // when AirPods connected.
+        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: nil) { [weak self] _ in
             Task { @MainActor in await self?.repairIfNeeded() }
         }
         router.onAudioChange = { [weak self] in
@@ -118,13 +123,26 @@ final class MixerStore: ObservableObject {
             }
         }
     }
+    // Reads devices off the main thread. Only the newest read is applied.
     func refreshDevices() {
         log.notice("Devices changed: refresh start")
-        defaultOutputID = try? Devices.defaultOutputID()
-        do { devices = try Devices.list() } catch { message = error.localizedDescription }
-        log.notice("Devices refreshed: \(self.devices.map(\.name).joined(separator: ", "), privacy: .public)")
-        enforcePreferredInput()
-        if running { Task { await apply() } }
+        deviceGeneration += 1
+        let generation = deviceGeneration
+        Task {
+            let loaded = await Devices.load()
+            guard generation == deviceGeneration else { return }
+            useDevices(loaded)
+            log.notice("Devices refreshed: \(self.devices.map(\.name).joined(separator: ", "), privacy: .public)")
+            enforcePreferredInput()
+            if running { await apply() }
+        }
+    }
+    private func useDevices(_ loaded: (list: Result<[Device], Error>, defaultOutput: AudioDeviceID?)) {
+        defaultOutputID = loaded.defaultOutput
+        switch loaded.list {
+        case .success(let list): devices = list
+        case .failure(let error): message = error.localizedDescription
+        }
     }
     func enforcePreferredInput() {
         guard ProcessInfo.processInfo.environment["MIXOTO_SMOKE_REPORT"] == nil,
@@ -149,13 +167,15 @@ final class MixerStore: ObservableObject {
         guard !running, !busy else { return }
         running = true
         clientLog?.start()
+        // Device lists load in the background; the first one may not be here yet.
+        if devices.isEmpty { useDevices(await Devices.load()) }
         await apply()
     }
     func stop() async {
         running = false
         previewingStream = false
         clientLog?.stop()
-        router.stop()
+        await router.stop()
         droppedBlocks = 0
         receivedBlocks = 0
         latencies = [:]
@@ -172,7 +192,7 @@ final class MixerStore: ObservableObject {
                 log.error("Capture failed: \(error, privacy: .public)")
                 Task { @MainActor in self?.message = "Capture stopped: \(error)" }
             }
-            guard running else { router.stop(); return }
+            guard running else { await router.stop(); return }
             message = problems.first ?? ""
         } while pending
     }
@@ -185,8 +205,7 @@ final class MixerStore: ObservableObject {
     private func repairIfNeeded() async {
         guard running, !applying, let problem = router.check() else { return }
         log.notice("Repair: \(problem, privacy: .public)")
-        if let list = try? Devices.list() { devices = list }
-        defaultOutputID = try? Devices.defaultOutputID()
+        useDevices(await Devices.load())
         await apply()
     }
     func changed() {
@@ -223,8 +242,7 @@ final class MixerStore: ObservableObject {
         do {
             try await DriverInstaller.install(driver: driver, script: script)
             try? await Task.sleep(for: .seconds(2))
-            if let list = try? Devices.list() { devices = list }
-            defaultOutputID = try? Devices.defaultOutputID()
+            useDevices(await Devices.load())
             message = devices.contains(where: \.isStreamMix) ? "Virtual device installed and loaded."
                 : "Virtual device installed, but Core Audio has not loaded it. Restart macOS."
         } catch { message = error.localizedDescription }
