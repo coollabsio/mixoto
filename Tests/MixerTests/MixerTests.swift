@@ -4,6 +4,19 @@ import CoreAudio
 @testable import Mixer
 
 final class MixerTests: XCTestCase {
+    // A format mismatch in connect() raised an Objective-C exception that
+    // crashed Mixoto when AirPods were turned off. It must be a Swift error.
+    @MainActor
+    func testEngineExceptionBecomesSwiftError() async throws {
+        let engine = AVAudioEngine()
+        let detached = AVAudioPlayerNode()
+        XCTAssertThrowsError(try catchingException { engine.connect(detached, to: engine.mainMixerNode, format: nil) }) { error in
+            XCTAssertFalse(error.localizedDescription.isEmpty)
+        }
+        // The main actor must still work after the caught exception.
+        await Task.yield()
+        XCTAssertNoThrow(try catchingException {})
+    }
     @MainActor
     func testStopClearsDisplayedCountersEvenWhenAlreadyStopped() async {
         let key = "MIXOTO_SMOKE_REPORT"

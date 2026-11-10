@@ -1,3 +1,4 @@
+import ObjCCatch
 import Foundation
 
 struct Channel: Identifiable, Codable, Equatable {
@@ -139,6 +140,15 @@ struct Latency: Equatable {
 enum MixerError: LocalizedError {
     case message(String)
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
+}
+
+// AVAudioEngine throws Objective-C exceptions, for example when a device
+// changes format during connect(). An exception that unwinds a Swift task on
+// the main actor leaves its executor state invalid; AppKit catches it, and the
+// next SwiftUI render crashes. Turning AirPods off crashed Mixoto this way.
+func catchingException(_ body: () -> Void) throws {
+    var error: NSError?
+    guard ObjCCatch(body, &error) else { throw MixerError.message(error?.localizedDescription ?? "Audio engine error.") }
 }
 
 // Limits audio waiting in a player. Drop incoming blocks, rather than

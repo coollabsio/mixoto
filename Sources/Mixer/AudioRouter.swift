@@ -72,7 +72,7 @@ final class OutputBus {
         engine.prepare()
         try engine.start()
         active = true
-        if !engine.isInManualRenderingMode { players.values.forEach { $0.play() } }
+        if !engine.isInManualRenderingMode { players.values.forEach(Self.play) }
     }
     // Adds, removes, and updates channel players while the engine runs.
     // Engine and player calls stay outside the lock. player.play() waits on
@@ -94,7 +94,7 @@ final class OutputBus {
             let player = AVAudioPlayerNode()
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: Self.format)
-            if engine.isRunning, !engine.isInManualRenderingMode { player.play() }
+            if engine.isRunning, !engine.isInManualRenderingMode { Self.play(player) }
             added[id] = player
         }
         lock.lock()
@@ -102,6 +102,11 @@ final class OutputBus {
         let current = players
         lock.unlock()
         for (id, channel) in wanted { current[id]?.volume = gain(channel) }
+    }
+    // play() throws when the engine stopped for a device change after the
+    // isRunning check. The health check then rebuilds the bus.
+    private static func play(_ player: AVAudioPlayerNode) {
+        do { try catchingException { player.play() } } catch { log.error("Player did not start: \(error.localizedDescription, privacy: .public)") }
     }
     func setPreviewStream(_ on: Bool, channels: [Channel]) {
         lock.lock(); previewStream = on; let current = players; lock.unlock()
@@ -173,13 +178,15 @@ final class MicrophoneCapture {
               let unit = engine.inputNode.audioUnit else { return false }
         var actual: AudioDeviceID = 0
         var size = UInt32(MemoryLayout.size(ofValue: actual))
-        let currentFormat = engine.inputNode.outputFormat(forBus: 0)
+        let currentFormat = engine.inputNode.inputFormat(forBus: 0)
         return AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &actual, &size) == noErr && actual == selectedDevice.id && currentFormat.sampleRate == selectedFormat.sampleRate && currentFormat.channelCount == selectedFormat.channelCount
     }
     func start(device: Device, receive: @escaping (AVAudioPCMBuffer) -> Void, failure: @escaping (String) -> Void) throws {
         let input = engine.inputNode
         try Devices.select(device, node: input)
-        let format = input.outputFormat(forBus: 0)
+        // Hardware format. The output format can still be the previous device's,
+        // and connect() throws when it does not match the hardware.
+        let format = input.inputFormat(forBus: 0)
         selectedDevice = device; selectedFormat = format
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw MixerError.message("The microphone format is not supported.")
@@ -196,8 +203,10 @@ final class MicrophoneCapture {
         }
         let chain = [input, lowCut] + [voiceFocus].compactMap { $0 } + [sink]
         chain.dropFirst().forEach(engine.attach)
-        for (source, destination) in zip(chain, chain.dropFirst()) { engine.connect(source, to: destination, format: format) }
-        engine.prepare()
+        try catchingException {
+            for (source, destination) in zip(chain, chain.dropFirst()) { engine.connect(source, to: destination, format: format) }
+            engine.prepare()
+        }
         try engine.start()
     }
     // Applies the channel's microphone settings. Clipguard is sent to a
