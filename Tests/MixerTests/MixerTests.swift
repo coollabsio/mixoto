@@ -288,6 +288,43 @@ final class MixerTests: XCTestCase {
         XCTAssertEqual(buses.activity(id).sound, sound)
         XCTAssertEqual(buses.activity(UUID()).input, 0)
     }
+    // A replacement tap runs next to the old one. The output has no gap, no
+    // doubled block, and no old audio after the crossfade.
+    func testReplacedCaptureHandsOffWithoutGapOrDoubling() throws {
+        let channel = Channel(source: "app:test")
+        let bus = try OutputBus(device: nil, channels: [channel], monitor: true)
+        let buses = BusSet()
+        buses.set([bus])
+        defer { bus.stop() }
+        buses.expect(1, channel: channel.id)
+        buses.feed(constantBuffer(0.5, frames: 480), channel: channel.id, source: 1)
+        buses.expect(2, channel: channel.id)
+        buses.feed(constantBuffer(0.5, frames: 480), channel: channel.id, source: 2)
+        XCTAssertTrue(buses.handingOff)
+        buses.feed(constantBuffer(0.5, frames: 480), channel: channel.id, source: 1)
+        XCTAssertFalse(buses.handingOff)
+        // Old audio after the crossfade is ignored.
+        buses.feed(constantBuffer(0.9, frames: 480), channel: channel.id, source: 1)
+        XCTAssertEqual(buses.activity(channel.id).frames, 2 * 480)
+        let output = try bus.renderOffline(frames: 2 * 480)
+        let samples = (0..<Int(output.frameLength)).map { output.floatChannelData![0][$0] }
+        XCTAssertEqual(samples.min()!, 0.5, accuracy: 0.001)
+        XCTAssertEqual(samples.max()!, 0.5, accuracy: 0.001)
+    }
+    // An old capture that delivers nothing more: the new one fades in.
+    func testReplacementFadesInWhenOldCaptureIsSilent() throws {
+        let buses = BusSet(), id = UUID()
+        buses.expect(1, channel: id)
+        buses.feed(constantBuffer(0.5, frames: 480), channel: id, source: 1)
+        buses.expect(2, channel: id)
+        let first = constantBuffer(0.5, frames: 480)
+        buses.feed(first, channel: id, source: 2)
+        buses.feed(constantBuffer(0.5, frames: 480), channel: id, source: 2)
+        XCTAssertFalse(buses.handingOff)
+        XCTAssertEqual(first.floatChannelData![0][0], 0)
+        XCTAssertEqual(first.floatChannelData![0][479], 0.5, accuracy: 0.002)
+        XCTAssertEqual(buses.activity(id).frames, 3 * 480)
+    }
     func testAudioClientLogFindsProcessIDsAcrossChunks() {
         var found: [pid_t?] = []
         let watcher = AudioClientLog { found.append($0) }

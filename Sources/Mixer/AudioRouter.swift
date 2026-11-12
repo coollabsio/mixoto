@@ -241,6 +241,12 @@ final class BusSet: @unchecked Sendable {
     private var sounds: [UUID: TimeInterval] = [:]
     // Frames received per channel, at 48 kHz after conversion.
     private var frames: [UUID: Int] = [:]
+    // The capture that feeds each channel. A channel without an entry takes
+    // any capture.
+    private var sources: [UUID: Int] = [:]
+    // A replacement capture that runs next to the old one, and its first
+    // block, held until the old capture delivers its next block.
+    private var handoffs: [UUID: (source: Int, first: AVAudioPCMBuffer?)] = [:]
     // Meter ballistics: instant rise, then a fall of this many dB per second.
     static let releaseDBPerSecond: Float = 30
     // The old buses are released after unlock, on the caller's thread.
@@ -248,9 +254,39 @@ final class BusSet: @unchecked Sendable {
         lock.lock(); let old = buses; buses = value; lock.unlock()
         withExtendedLifetime(old) {}
     }
-    func feed(_ buffer: AVAudioPCMBuffer, channel: UUID) {
-        let peak = Self.peak(buffer), now = ProcessInfo.processInfo.systemUptime
+    // Makes source the channel's next capture. When the channel already has
+    // a capture, both run for a short time: the old one feeds until the new
+    // one delivers, then one block crossfades from old to new. A hard switch
+    // between two taps clicks, because they are not sample-aligned.
+    func expect(_ source: Int, channel: UUID) {
         lock.lock(); defer { lock.unlock() }
+        if sources[channel] == nil { sources[channel] = source } else { handoffs[channel] = (source, nil) }
+    }
+    var handingOff: Bool { lock.lock(); defer { lock.unlock() }; return !handoffs.isEmpty }
+    func remove(_ channel: UUID) {
+        lock.lock(); sources[channel] = nil; handoffs[channel] = nil; lock.unlock()
+    }
+    func feed(_ buffer: AVAudioPCMBuffer, channel: UUID, source: Int = 0) {
+        lock.lock(); defer { lock.unlock() }
+        if let handoff = handoffs[channel], handoff.source == source {
+            guard let first = handoff.first else { handoffs[channel]?.first = buffer; return }
+            // Two new blocks and no old one: the old capture is silent or
+            // stopped. Fade in the new one.
+            sources[channel] = source; handoffs[channel] = nil
+            Self.fadeIn(first)
+            deliver(first, channel: channel); deliver(buffer, channel: channel)
+            return
+        }
+        guard sources[channel].map({ $0 == source }) ?? true else { return }
+        if let first = handoffs[channel]?.first, let source = handoffs[channel]?.source {
+            sources[channel] = source; handoffs[channel] = nil
+            deliver(Self.crossfade(from: buffer, to: first), channel: channel)
+            return
+        }
+        deliver(buffer, channel: channel)
+    }
+    private func deliver(_ buffer: AVAudioPCMBuffer, channel: UUID) {
+        let peak = Self.peak(buffer), now = ProcessInfo.processInfo.systemUptime
         let held = meters[channel].map { Self.decay($0.peak, over: now - $0.time) } ?? 0
         meters[channel] = (max(held, peak), now)
         if peak > 0 { sounds[channel] = now }
@@ -269,6 +305,29 @@ final class BusSet: @unchecked Sendable {
     }
     static func decay(_ peak: Float, over seconds: TimeInterval) -> Float {
         peak * pow(10, -releaseDBPerSecond * Float(max(0, seconds)) / 20)
+    }
+    // Linear ramp from 0 to 1 over the whole block.
+    static func fadeIn(_ buffer: AVAudioPCMBuffer) {
+        guard let data = buffer.floatChannelData, buffer.frameLength > 0 else { return }
+        let count = Float(buffer.frameLength)
+        for channel in 0..<Int(buffer.format.channelCount) {
+            for frame in 0..<Int(buffer.frameLength) {
+                data[channel][frame] *= Float(frame) / count
+            }
+        }
+    }
+    // Returns `to`, with its start crossfaded from `from`. Linear gains, as
+    // both blocks carry the same, nearly aligned audio.
+    static func crossfade(from: AVAudioPCMBuffer, to: AVAudioPCMBuffer) -> AVAudioPCMBuffer {
+        guard let old = from.floatChannelData, let new = to.floatChannelData else { return to }
+        let frames = Int(min(from.frameLength, to.frameLength))
+        for channel in 0..<Int(min(from.format.channelCount, to.format.channelCount)) {
+            for frame in 0..<frames {
+                let t = Float(frame) / Float(frames)
+                new[channel][frame] = old[channel][frame] * (1 - t) + new[channel][frame] * t
+            }
+        }
+        return to
     }
     static func peak(_ buffer: AVAudioPCMBuffer) -> Float {
         guard let data = buffer.floatChannelData else { return 0 }
@@ -299,6 +358,8 @@ final class AudioRouter {
         monitor?.setPreviewStream(on, channels: channels)
     }
     private let buses = BusSet()
+    // Identifies each capture's feed, so a replaced capture can feed next to its successor.
+    private var nextFeed = 1
     private var captures: [UUID: (source: String, capture: Capture, started: TimeInterval)] = [:]
     // Channels whose app plays output while the tap delivers only silence;
     // logged once per period. Not repaired: apps such as Klack keep output
@@ -477,18 +538,30 @@ final class AudioRouter {
         monitor?.sync(settings.channels.filter { active[$0.id] != nil })
         stream?.sync(settings.channels.filter { active[$0.id] != nil })
         let now = ProcessInfo.processInfo.systemUptime
+        // An app tap that is replaced by another app tap stops only after the
+        // new tap delivers (see BusSet.expect). Stopping first left the app
+        // silent for about 170 ms per channel, and the teardown overloaded
+        // the HAL: the user heard music stop and click.
+        var replaced: [Capture] = []
         for (id, entry) in captures {
             let problem = active[id] == entry.source ? captureProblem(id, now: now) : "source changed"
             guard let problem else { continue }
             log.notice("Capture stop (\(problem, privacy: .public)): \(self.describe(id), privacy: .public)")
             captures[id] = nil
-            await entry.capture.stop()
+            if case .app = entry.capture, let next = active[id], !next.hasPrefix("mic:") {
+                replaced.append(entry.capture)
+            } else {
+                buses.remove(id)
+                await entry.capture.stop()
+            }
             silent.remove(id); restart.remove(id); wasPlaying[id] = nil; playStarts[id] = nil; seenChanges[id] = nil; stats[id] = nil
         }
         for (id, source) in active where captures[id] == nil {
             log.notice("Capture start: channel \(id.uuidString.prefix(8), privacy: .public) \(settings.channels.first(where: { $0.id == id })?.name ?? "", privacy: .public) \(source, privacy: .public)")
-            let buses = buses
-            let receive: (AVAudioPCMBuffer) -> Void = { buses.feed($0, channel: id) }
+            let buses = buses, feed = nextFeed
+            nextFeed += 1
+            buses.expect(feed, channel: id)
+            let receive: (AVAudioPCMBuffer) -> Void = { buses.feed($0, channel: id, source: feed) }
             do {
                 if source.hasPrefix(Channel.system) {
                     let excluded = source.dropFirst(Channel.system.count + 1).split(separator: ",").compactMap { AudioObjectID($0) }
@@ -517,6 +590,14 @@ final class AudioRouter {
                 problems.append("\(name): \(error.localizedDescription)")
             }
         }
+        if !replaced.isEmpty {
+            // A new tap delivers within a few I/O cycles. A tap that does not
+            // gets its first block faded in when the old one is gone.
+            for _ in 0..<25 where buses.handingOff {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            for capture in replaced { await capture.stop() }
+        }
         for channel in settings.channels {
             guard case .mic(let microphone)? = captures[channel.id]?.capture else { continue }
             do { try microphone.update(channel) } catch { problems.append("\(channel.name): \(error.localizedDescription)") }
@@ -526,6 +607,7 @@ final class AudioRouter {
     }
     func stop() async {
         let stopping = captures.values.map(\.capture)
+        captures.keys.forEach(buses.remove)
         previewStream = false
         captures.removeAll(); silent.removeAll(); restart.removeAll(); wasPlaying.removeAll(); playStarts.removeAll(); seenChanges.removeAll(); stats.removeAll()
         buses.set([])
