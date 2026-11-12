@@ -207,13 +207,21 @@ final class ProcessCapture: @unchecked Sendable {
             guard let format = AVAudioFormat(streamDescription: &asbd) else { throw MixerError.message("The application audio format is not available.") }
             let normalizer = try PCMNormalizer(format: format)
             log.notice("Tap format: \(asbd.mSampleRate) Hz, \(asbd.mChannelsPerFrame) ch, interleaved=\(format.isInterleaved)")
-            let composition: [String: Any] = [
+            var composition: [String: Any] = [
                 kAudioAggregateDeviceNameKey: "Mixoto private capture",
                 kAudioAggregateDeviceUIDKey: UUID().uuidString,
                 kAudioAggregateDeviceIsPrivateKey: true,
                 kAudioAggregateDeviceTapAutoStartKey: false,
                 kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: description.uuid.uuidString, kAudioSubTapDriftCompensationKey: true]]
             ]
+            // Clock the tap by the default output, where the tapped apps play.
+            // AirPods play faster or slower for about a second when Game Mode
+            // changes their latency; apps follow, and a tap on its own clock
+            // did not: the Monitor ran about 100 ms short, heard as dips.
+            if let output = try? Devices.defaultOutputID(), let uid = Devices.string(output, kAudioDevicePropertyDeviceUID) {
+                composition[kAudioAggregateDeviceMainSubDeviceKey] = uid
+                composition[kAudioAggregateDeviceSubDeviceListKey] = [[kAudioSubDeviceUIDKey: uid]]
+            }
             try Devices.check(AudioHardwareCreateAggregateDevice(composition as CFDictionary, &aggregateID))
             try Devices.check(AudioDeviceCreateIOProcIDWithBlock(&ioProc, aggregateID, queue) { [weak self] _, input, _, _, _ in
                 guard let self, !self.reportedFailure else { return }
