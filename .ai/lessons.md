@@ -105,3 +105,18 @@
   the default output device in a loop and sampling the process.
   Run `sh scripts/stress-device-switch.sh 20 <other output ID>` before a
   release that touches audio threading; it failed on v0.0.10 and passes now.
+
+- 2026-11-12: AirPods dips/"thin" sound with Mixoto after Cmd-Tab to
+  Moonlight. I first blamed AirPods features, then Mixoto's queue sizes; the
+  user corrected both ("no problem without Mixoto"; fixes changed nothing).
+  Real cause: Game Mode makes AirPods change their jitter buffer by playing
+  ~10% faster/slower for ~1 s (bluetoothd "audio delivery speed ...
+  multiplier"). Apps follow; taps on their own clock did not. Fix: clock tap
+  aggregates by the default output (main subdevice). Rules: when the user says
+  "only with Mixoto", compare system logs (bluetoothd, coreaudiod,
+  gamepolicyd) with and without Mixoto before changing code. After two failed
+  fixes on one premise, test the premise. Count events per second (empty
+  player, drops, tap frames/s) instead of guessing from symptoms.
+- 2026-11-12: scripts/stress-device-switch.sh now fails on v0.0.12, HEAD and
+  the fix alike (EXC_BAD_ACCESS in AVAudioIOUnit::IOUnitPropertyListener).
+  Run the stress test on the old build too before blaming a new change.
