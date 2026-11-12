@@ -132,6 +132,19 @@ func queueLimit(block: Double, outputBuffer: Double) -> Double {
     2 * block + outputBuffer + 0.005
 }
 
+// Frames to play a block over, so a player's queue stays between half a block
+// and the limit. Two clocks can differ: the Stream Mix runs steadily while
+// AirPods play about 10% faster or slower for a second when Game Mode changes
+// their latency, and the taps follow the AirPods. Dropped blocks cut the
+// Stream Mix many times; a block one eighth shorter or longer changes speed
+// for a moment instead. A backlog above twice the limit is old audio, for
+// example after a late Bluetooth start, and the bus drops it.
+func adaptedFrames(_ frames: UInt32, block: Double, queued: Double, limit: Double) -> UInt32 {
+    if queued + block > limit { return frames - frames / 8 }
+    if queued < block / 2 { return frames + frames / 8 }
+    return frames
+}
+
 struct Latency: Equatable {
     var monitor: Double?
     var stream: Double?

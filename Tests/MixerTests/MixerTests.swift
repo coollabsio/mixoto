@@ -339,6 +339,34 @@ final class MixerTests: XCTestCase {
         XCTAssertFalse(Devices.belongs("net.imput.heliumx", to: "net.imput.helium"))
         XCTAssertFalse(Devices.belongs("com.apple.WebKit.GPU", to: "com.apple.Safari"))
     }
+    // A queue near its limit plays blocks shorter, an almost empty queue
+    // plays them longer, and a queue in between plays them unchanged.
+    func testAdaptedFramesKeepQueueBetweenHalfBlockAndLimit() {
+        let block = 512.0 / 48_000, limit = queueLimit(block: block, outputBuffer: block)
+        XCTAssertEqual(adaptedFrames(512, block: block, queued: 0, limit: limit), 576)
+        XCTAssertEqual(adaptedFrames(512, block: block, queued: block, limit: limit), 512)
+        XCTAssertEqual(adaptedFrames(512, block: block, queued: 2.5 * block, limit: limit), 448)
+    }
+    func testResampledBlockKeepsItsEndsAndShape() {
+        let buffer = AVAudioPCMBuffer(pcmFormat: OutputBus.format, frameCapacity: 9)!
+        buffer.frameLength = 9
+        for channel in 0..<2 { for frame in 0..<9 { buffer.floatChannelData![channel][frame] = Float(frame) } }
+        let shorter = OutputBus.resampled(buffer, frames: 5)!
+        XCTAssertEqual((0..<5).map { shorter.floatChannelData![1][$0] }, [0, 2, 4, 6, 8])
+        XCTAssertNil(OutputBus.resampled(buffer, frames: 9))
+    }
+    // Two clocks that differ: blocks arrive faster than the output plays. The
+    // bus plays them shorter instead of dropping, until the backlog is old audio.
+    func testBusShortensBlocksBeforeItDrops() throws {
+        let channel = Channel(source: "app:test")
+        let bus = try OutputBus(device: nil, channels: [channel], monitor: true)
+        defer { bus.stop() }
+        for _ in 0..<4 { bus.feed(constantBuffer(0.5, frames: 480), channel: channel.id) }
+        XCTAssertEqual(bus.droppedBlocks, 0)
+        XCTAssertLessThan(bus.latency(channel.id)!, 4 * 0.01)
+        for _ in 0..<20 { bus.feed(constantBuffer(0.5, frames: 480), channel: channel.id) }
+        XCTAssertGreaterThan(bus.droppedBlocks, 0)
+    }
     func testQueueLimitDropsBacklogAboveDeviceNeeds() {
         let budget = QueueBudget()
         let block = 512.0 / 48_000, limit = queueLimit(block: block, outputBuffer: block)

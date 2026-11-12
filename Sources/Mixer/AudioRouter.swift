@@ -129,8 +129,12 @@ final class OutputBus {
         lock.lock(); defer { lock.unlock() }
         guard active, let player = players[channel], let budget = budgets[channel] else { return }
         received += 1
+        let block = Double(buffer.frameLength) / buffer.format.sampleRate
+        let limit = queueLimit(block: block, outputBuffer: outputBuffer)
+        let frames = adaptedFrames(buffer.frameLength, block: block, queued: budget.queued, limit: limit)
+        let buffer = Self.resampled(buffer, frames: frames) ?? buffer
         let duration = Double(buffer.frameLength) / buffer.format.sampleRate
-        guard budget.reserve(duration, limit: queueLimit(block: duration, outputBuffer: outputBuffer)) else {
+        guard budget.reserve(duration, limit: 2 * limit) else {
             dropped += 1; channelDrops[channel, default: 0] += 1
             if dropStarts[channel] == nil { dropStarts[channel] = ProcessInfo.processInfo.systemUptime }
             return
@@ -139,6 +143,26 @@ final class OutputBus {
             log.notice("\(self.name, privacy: .public) bus dropped all audio of channel \(channel.uuidString.prefix(8), privacy: .public) for \(ProcessInfo.processInfo.systemUptime - start, format: .fixed(precision: 1)) s")
         }
         player.scheduleBuffer(buffer, completionCallbackType: .dataRendered) { _ in budget.release(duration) }
+    }
+    // The block played over `frames` frames, by linear interpolation. The
+    // first and last samples stay, so neighbor blocks join without a click.
+    static func resampled(_ buffer: AVAudioPCMBuffer, frames: AVAudioFrameCount) -> AVAudioPCMBuffer? {
+        let count = Int(buffer.frameLength), target = Int(frames)
+        guard target != count, count > 1, target > 1, let source = buffer.floatChannelData,
+              let output = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: frames),
+              let data = output.floatChannelData else { return nil }
+        output.frameLength = frames
+        let step = Double(count - 1) / Double(target - 1)
+        for channel in 0..<Int(buffer.format.channelCount) {
+            let input = source[channel], result = data[channel]
+            for index in 0..<target {
+                let position = Double(index) * step
+                let lower = min(Int(position), count - 1), upper = min(lower + 1, count - 1)
+                let fraction = Float(position - Double(lower))
+                result[index] = input[lower] + (input[upper] - input[lower]) * fraction
+            }
+        }
+        return output
     }
     // Stops the engine outside the lock: engine.stop() can wait on Core Audio,
     // and feed() takes the lock on audio threads.
