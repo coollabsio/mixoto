@@ -120,3 +120,16 @@
 - 2026-11-12: scripts/stress-device-switch.sh now fails on v0.0.12, HEAD and
   the fix alike (EXC_BAD_ACCESS in AVAudioIOUnit::IOUnitPropertyListener).
   Run the stress test on the old build too before blaming a new change.
+
+- 2026-11-15: Mixoto used 116% CPU and 1.4 GB after 3 days. App taps were
+  rebuilt about every 3 s ("no input for N s", Klack "tap silent" after
+  'over' overload events). macOS 27 Core Audio leaks one MTDIOProcTracker,
+  MTDIOProcInterceptor and serial queue per IOProc, even after
+  AudioDeviceDestroyIOProcID (proved with a standalone probe, block and
+  function-pointer APIs alike). 170k leaked trackers made the HAL listener
+  queue 100% busy; the HAL client went stale (default output 82 vs real 80,
+  "no such object"), so new taps stalled too: a spiral. coreaudiod also grew
+  to 1.2 GB and stopped answering. Rules: every IOProc costs memory forever;
+  never rebuild a capture in a tight loop (repairDelay backoff in
+  AudioRouter). Check `heap <pid> -s` for growing Core Audio classes and
+  count "Capture start" per hour when CPU or memory grows over days.
