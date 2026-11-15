@@ -87,9 +87,13 @@ final class ProcessCapture: @unchecked Sendable {
     private let listenerQueue = DispatchQueue(label: "Mixoto.process-tap-listener")
     private var changeTime: TimeInterval = 0
     private var observedSince: TimeInterval = 0
-    // Changes that Mixoto's own captures cause: device start and stop, and the
-    // process mute state ('pomt') that each tap sets with mutedWhenTapped.
-    static let ignoredProperties: Set<AudioObjectPropertySelector> = [kAudioDevicePropertyDeviceIsRunning, kAudioDevicePropertyDeviceIsRunningSomewhere, 0x706F_6D74]
+    // Changes that Mixoto's own captures cause: device start and stop, the
+    // process mute state ('pomt') that each tap sets with mutedWhenTapped,
+    // and I/O overload ('over') and alive ('livn') of the capture device.
+    // Overload under load marked Klack as changed, and its silent tap was
+    // rebuilt again and again. A dead device stops input; check() finds that.
+    static let ignoredProperties: Set<AudioObjectPropertySelector> = [kAudioDevicePropertyDeviceIsRunning, kAudioDevicePropertyDeviceIsRunningSomewhere, 0x706F_6D74,
+                                                                      kAudioDeviceProcessorOverload, kAudioDevicePropertyDeviceIsAlive]
     private var selectedFormat: AudioStreamBasicDescription?
     private var reportedFailure = false
     private let receive: (AVAudioPCMBuffer) -> Void

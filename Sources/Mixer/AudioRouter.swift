@@ -397,6 +397,14 @@ final class AudioRouter {
     private var playStarts: [UUID: TimeInterval] = [:]
     private var seenChanges: [UUID: TimeInterval] = [:]
     private var restart = Set<UUID>()
+    // Each tap rebuild leaks Core Audio memory (one MTDIOProcTracker per
+    // IOProc, also after AudioDeviceDestroyIOProcID; macOS 27). Taps that
+    // stalled again and again were rebuilt about every 3 s: after 3 days
+    // Mixoto used 1.4 GB and more than one CPU core. A channel that is rebuilt
+    // waits twice as long before its next repair, up to maxRepairDelay.
+    private var repairDelay: [UUID: TimeInterval] = [:]
+    static let minRepairDelay: TimeInterval = 5
+    static let maxRepairDelay: TimeInterval = 300
     static let startWindow: TimeInterval = 10
     // Every statsInterval, a channel that dropped blocks or received audio at a
     // wrong rate (not 48 kHz within 2%) is logged: heard as crackle or wrong pitch.
@@ -434,8 +442,18 @@ final class AudioRouter {
         guard let input = captures[channel]?.capture.latency else { return nil }
         return Latency(monitor: monitor?.latency(channel).map { input + $0 }, stream: stream?.latency(channel).map { input + $0 })
     }
-    // Why a capture must restart, or nil.
+    // Why a capture must restart now, or nil. A capture rebuilt recently
+    // waits until its repair delay ends.
     private func captureProblem(_ id: UUID, now: TimeInterval) -> String? {
+        guard let entry = captures[id] else { return nil }
+        let delay = repairDelay[id] ?? 0
+        guard let problem = rawCaptureProblem(id, now: now) else {
+            if now - entry.started > 2 * Self.maxRepairDelay { repairDelay[id] = nil }
+            return nil
+        }
+        return now - entry.started >= delay ? problem : nil
+    }
+    private func rawCaptureProblem(_ id: UUID, now: TimeInterval) -> String? {
         guard let entry = captures[id] else { return nil }
         guard entry.capture.isHealthy else { return "capture unhealthy" }
         if case .app(let capture) = entry.capture, capture.reconfigured, now - capture.lastChange >= Self.settleTime {
@@ -571,6 +589,9 @@ final class AudioRouter {
             let problem = active[id] == entry.source ? captureProblem(id, now: now) : "source changed"
             guard let problem else { continue }
             log.notice("Capture stop (\(problem, privacy: .public)): \(self.describe(id), privacy: .public)")
+            if active[id] == entry.source {
+                repairDelay[id] = min(max(2 * (repairDelay[id] ?? 0), Self.minRepairDelay), Self.maxRepairDelay)
+            } else { repairDelay[id] = nil }
             captures[id] = nil
             if case .app = entry.capture, let next = active[id], !next.hasPrefix("mic:") {
                 replaced.append(entry.capture)
@@ -633,7 +654,7 @@ final class AudioRouter {
         let stopping = captures.values.map(\.capture)
         captures.keys.forEach(buses.remove)
         previewStream = false
-        captures.removeAll(); silent.removeAll(); restart.removeAll(); wasPlaying.removeAll(); playStarts.removeAll(); seenChanges.removeAll(); stats.removeAll()
+        captures.removeAll(); silent.removeAll(); restart.removeAll(); repairDelay.removeAll(); wasPlaying.removeAll(); playStarts.removeAll(); seenChanges.removeAll(); stats.removeAll()
         buses.set([])
         monitor?.stop(); stream?.stop()
         monitor = nil; stream = nil
