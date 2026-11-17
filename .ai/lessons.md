@@ -133,3 +133,14 @@
   never rebuild a capture in a tight loop (repairDelay backoff in
   AudioRouter). Check `heap <pid> -s` for growing Core Audio classes and
   count "Capture start" per hour when CPU or memory grows over days.
+
+- 2026-11-17: Stream Mix silent after launch (v0.0.14) once the Wave:3 was
+  the default output. The AirPods clock fix adds the default output as a
+  sub-device of each tap aggregate; a device with a microphone adds its input
+  stream before the tap stream, and PCMNormalizer.copy wanted exactly one
+  buffer, so every tap delivered nothing ("no input for 2 s" rebuild loop).
+  MacBook Speakers and AirPods (A2DP) have no input, so it hid. Rules: test
+  aggregate changes with an output device that also has an input; the tap
+  stream is the last buffers of the aggregate's input list. Terminal ffmpeg
+  records only zeros (-91 dB) without mic permission: check a control device
+  first, or use Mixoto's "no input"/"Channel stats" logs.
