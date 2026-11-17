@@ -37,9 +37,15 @@ final class PCMNormalizer {
         self.format = format; self.converter = converter
     }
     func copy(_ list: UnsafePointer<AudioBufferList>) throws -> AVAudioPCMBuffer? {
-        let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
-        guard buffers.count == (format.isInterleaved ? 1 : Int(format.channelCount)),
-              buffers.allSatisfy({ $0.mData != nil }),
+        // A tap aggregate lists the input streams of its clock sub-device
+        // (for example the Wave:3 microphone) before the tap stream, so the
+        // source is the last buffers. Taking all of them gave no tap audio
+        // when the default output also had an input.
+        let all = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
+        let count = format.isInterleaved ? 1 : Int(format.channelCount)
+        guard all.count >= count else { return nil }
+        let buffers = Array(all.suffix(count))
+        guard buffers.allSatisfy({ $0.mData != nil }),
               let first = buffers.first else { return nil }
         let bytesPerFrame = format.streamDescription.pointee.mBytesPerFrame
         guard bytesPerFrame > 0 else { return nil }

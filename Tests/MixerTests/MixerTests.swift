@@ -540,6 +540,24 @@ final class MixerTests: XCTestCase {
             XCTAssertEqual(copied.floatChannelData![1][127], -0.4)
         }
     }
+    // A tap aggregate clocked by a device with a microphone (Wave:3) delivers
+    // the microphone stream first and the tap stream last.
+    func testTapStreamAfterSubDeviceInput() throws {
+        let tapFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: true)!
+        let tap = AVAudioPCMBuffer(pcmFormat: tapFormat, frameCapacity: 128)!
+        tap.frameLength = 128
+        for frame in 0..<128 { tap.floatChannelData![0][frame * 2] = 0.2; tap.floatChannelData![0][frame * 2 + 1] = -0.4 }
+        let mic = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!, frameCapacity: 128)!
+        mic.frameLength = 128
+        let list = AudioBufferList.allocate(maximumBuffers: 2)
+        defer { free(list.unsafeMutablePointer) }
+        list[0] = mic.audioBufferList.pointee.mBuffers
+        list[1] = tap.audioBufferList.pointee.mBuffers
+        let copied = try XCTUnwrap(PCMNormalizer(format: tapFormat).copy(list.unsafePointer))
+        XCTAssertEqual(copied.frameLength, 128)
+        XCTAssertEqual(copied.floatChannelData![0][127], 0.2)
+        XCTAssertEqual(copied.floatChannelData![1][127], -0.4)
+    }
     func testMonoMicrophoneConversion() throws {
         let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
         let source = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512)!
